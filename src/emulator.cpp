@@ -281,6 +281,7 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
                    std::optional<std::filesystem::path> p_game_folder,
                    std::vector<std::pair<std::filesystem::path, std::string>> mounts,
                    std::vector<std::string> const& env_vars, bool append_log) {
+    game_started = false;
     Common::SetCurrentThreadName("shadPS4:Main");
     if (waitForDebuggerBeforeRun) {
         Debugger::WaitForDebuggerAttach();
@@ -679,7 +680,11 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     // Load the module with the linker.
     if (linker->LoadModule(guest_eboot_path) == -1) {
         LOG_CRITICAL(Loader, "Failed to load game's eboot.bin: {}", guest_eboot_path);
+#if defined(LIBRETRO_CORE)
+        return;
+#else
         std::quick_exit(0);
+#endif
     }
 
 #ifdef ENABLE_DISCORD_RPC
@@ -703,7 +708,10 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
         });
     }
 
+    game_started = true;
     linker->Execute(args);
+
+#if !defined(LIBRETRO_CORE)
 
     window->InitTimers();
     while (window->IsOpen()) {
@@ -711,10 +719,15 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     }
 
     std::quick_exit(0);
+#endif
 }
 
 void Emulator::Restart(std::filesystem::path eboot_path,
                        const std::vector<std::string>& guest_args) {
+#if defined(LIBRETRO_CORE)
+    LOG_ERROR(Loader, "Libretro game restart requires a new worker process");
+    return;
+#endif
     std::vector<std::string> args;
 
     auto& game_info = Common::ElfInfo::Instance();

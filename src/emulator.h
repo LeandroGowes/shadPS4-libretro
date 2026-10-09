@@ -32,6 +32,9 @@ public:
              std::vector<std::string> const& env_vars = {}, bool append_log = false);
     void UpdatePlayTime(const std::string_view serial);
     void Shutdown();
+    bool IsGameStarted() const {
+        return game_started;
+    }
 
     /**
      * This will kill the current process and launch a new process with the same configuration
@@ -57,6 +60,7 @@ private:
     std::unique_ptr<Frontend::WindowSDL> window;
     std::chrono::steady_clock::time_point start_time;
     std::jthread play_time_thread;
+    bool game_started{};
 };
 
 } // namespace Core

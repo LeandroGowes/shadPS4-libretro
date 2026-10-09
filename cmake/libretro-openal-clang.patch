@@ -1,0 +1,13 @@
+diff --git a/alc/alc.cpp b/alc/alc.cpp
+index 321b185ca..392242cd4 100644
+--- a/alc/alc.cpp
++++ b/alc/alc.cpp
+@@ -1781,7 +1781,7 @@ auto UpdateDeviceParams(gsl::not_null<al::Device*> device,
+          * configuration in aluInitEffectPanning.
+          */
+         std::ranges::for_each(context->mEffectSlotClusters
+-            | std::views::transform(&ContextBase::EffectSlotCluster::operator*)
++            | std::views::transform([](auto &cluster) -> decltype(auto) { return *cluster; })
+             | std::views::join, [](EffectSlotBase &slot)
+         {
+             slot.mWetBuffer.clear();

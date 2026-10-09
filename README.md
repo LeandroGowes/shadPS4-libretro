@@ -3,6 +3,13 @@ SPDX-FileCopyrightText: 2026 shadPS4 Emulator Project
 SPDX-License-Identifier: GPL-2.0-or-later
 -->
 
+## Libretro core for Promus Play
+
+This fork adds an experimental Libretro core to the official shadPS4 sources.
+Windows x86_64 downloads are available in [Releases](https://github.com/LeandroGowes/shadPS4-libretro/releases).
+Read [LIBRETRO.md](LIBRETRO.md) for build instructions, upstream revision, and limitations.
+The Windows core embeds its compiler runtimes. Linux builds have not been validated.
+
 <h1 align="center">
   <br>
   <a href="https://shadps4.net/"><img src="https://github.com/shadps4-emu/shadPS4/blob/main/.github/shadps4.png" width="220"></a>
