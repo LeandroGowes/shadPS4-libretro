@@ -11,21 +11,27 @@
 #endif
 
 #include "common/error.h"
+#include "common/string_util.h"
 
 namespace Common {
 
 std::string NativeErrorToString(int e) {
 #ifdef _WIN32
-    LPSTR err_str;
+    LPWSTR err_str{};
 
-    DWORD res = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER |
+    DWORD res = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER |
                                    FORMAT_MESSAGE_IGNORE_INSERTS,
                                nullptr, e, MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US),
-                               reinterpret_cast<LPSTR>(&err_str), 1, nullptr);
+                               reinterpret_cast<LPWSTR>(&err_str), 1, nullptr);
     if (!res) {
-        return "(FormatMessageA failed to format error)";
+        res = FormatMessageW(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                                 FORMAT_MESSAGE_IGNORE_INSERTS,
+                             nullptr, e, 0, reinterpret_cast<LPWSTR>(&err_str), 1, nullptr);
+        if (!res) {
+            return "Windows error " + std::to_string(e);
+        }
     }
-    std::string ret(err_str);
+    std::string ret = UTF16ToUTF8(std::wstring_view(err_str, res));
     LocalFree(err_str);
     return ret;
 #else
