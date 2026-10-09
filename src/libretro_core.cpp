@@ -149,7 +149,7 @@ void PollInput() {
         if (!input_state_callback)
             return 128;
         const int raw = input_state_callback(0, RETRO_DEVICE_ANALOG, index, axis_id);
-        return std::clamp(128 + (raw * 127) / 32767, 0, 255);
+        return (raw + 32768) / 256;
     };
     state.OnAxis(Input::Axis::LeftX, axis(RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X),
                  timestamp, false);
