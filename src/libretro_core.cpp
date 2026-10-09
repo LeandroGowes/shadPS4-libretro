@@ -130,8 +130,8 @@ void PollInput() {
     };
     state.OnButton(Button::Cross, pressed(RETRO_DEVICE_ID_JOYPAD_B));
     state.OnButton(Button::Circle, pressed(RETRO_DEVICE_ID_JOYPAD_A));
-    state.OnButton(Button::Square, pressed(RETRO_DEVICE_ID_JOYPAD_X));
-    state.OnButton(Button::Triangle, pressed(RETRO_DEVICE_ID_JOYPAD_Y));
+    state.OnButton(Button::Square, pressed(RETRO_DEVICE_ID_JOYPAD_Y));
+    state.OnButton(Button::Triangle, pressed(RETRO_DEVICE_ID_JOYPAD_X));
     state.OnButton(Button::TouchPad, pressed(RETRO_DEVICE_ID_JOYPAD_SELECT));
     state.OnButton(Button::Options, pressed(RETRO_DEVICE_ID_JOYPAD_START));
     state.OnButton(Button::Up, pressed(RETRO_DEVICE_ID_JOYPAD_UP));
@@ -251,6 +251,44 @@ RETRO_API void RETRO_CALLCONV retro_init(void) {
         environment_callback(RETRO_ENVIRONMENT_GET_INPUT_BITMASKS, &support_bitmasks);
         bool no_game = false;
         environment_callback(RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME, &no_game);
+        static const retro_controller_description controller_types[] = {
+            {"DualShock 4", RETRO_DEVICE_JOYPAD},
+        };
+        static const retro_controller_info controllers[] = {
+            {controller_types, 1},
+            {nullptr, 0},
+        };
+        environment_callback(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO,
+                             const_cast<retro_controller_info*>(controllers));
+        static const retro_input_descriptor inputs[] = {
+            {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B, "Cross"},
+            {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A, "Circle"},
+            {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y, "Square"},
+            {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X, "Triangle"},
+            {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "Touchpad"},
+            {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Options"},
+            {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP, "Up"},
+            {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN, "Down"},
+            {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT, "Left"},
+            {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "Right"},
+            {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L, "L1"},
+            {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R, "R1"},
+            {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2, "L2"},
+            {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2, "R2"},
+            {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3, "L3"},
+            {0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R3, "R3"},
+            {0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X,
+             "Left Stick X"},
+            {0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y,
+             "Left Stick Y"},
+            {0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_X,
+             "Right Stick X"},
+            {0, RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_Y,
+             "Right Stick Y"},
+            {},
+        };
+        environment_callback(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS,
+                             const_cast<retro_input_descriptor*>(inputs));
     }
 }
 
