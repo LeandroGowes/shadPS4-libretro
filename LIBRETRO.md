@@ -47,6 +47,9 @@ O patch preserva o commit oficial do submódulo e está incluído no fork.
 ## Integração
 
 - API real `retro_*`, com vídeo XRGB8888, áudio estéreo 48 kHz e controles.
+- Publica os descritores DualShock 4, incluindo os dois sticks, para que o
+  frontend mantenha os analógicos separados do D-pad no modo automático.
+- RetroPad B/A/Y/X correspondem a Cross/Circle/Square/Triangle.
 - Renderização Vulkan do emulador em imagens fora da tela, com leitura para o
   callback de vídeo Libretro. Não abre uma janela SDL nem outro emulador.
 - Aceita `eboot.bin`, ELF, ZAR ou diretório de jogo contendo `eboot.bin`.
