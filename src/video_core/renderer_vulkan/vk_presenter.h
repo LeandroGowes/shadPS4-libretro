@@ -38,6 +38,10 @@ struct Frame {
     u8 id{};
 
     ImTextureID imgui_texture;
+#if defined(LIBRETRO_CORE)
+    vk::Buffer readback_buffer;
+    VmaAllocation readback_allocation{};
+#endif
 };
 
 enum SchedulerType {
@@ -70,14 +74,14 @@ public:
     }
 
     bool IsHDRSupported() const {
-        return swapchain.HasHDR();
+        return swapchain && swapchain->HasHDR();
     }
 
     void SetHDR(bool enable) {
         if (!IsHDRSupported()) {
             return;
         }
-        swapchain.SetHDR(enable);
+        swapchain->SetHDR(enable);
         pp_settings.hdr = enable ? 1 : 0;
     }
 
@@ -123,14 +127,14 @@ private:
     Scheduler draw_scheduler;
     Scheduler present_scheduler;
     Scheduler flip_scheduler;
-    Swapchain swapchain;
+    std::unique_ptr<Swapchain> swapchain;
     Runtime runtime;
     std::unique_ptr<Rasterizer> rasterizer;
     VideoCore::TextureCache& texture_cache;
     vk::UniqueCommandPool command_pool;
     std::vector<Frame> present_frames;
     std::queue<Frame*> free_queue;
-    Frame* last_submit_frame;
+    Frame* last_submit_frame{};
     std::mutex free_mutex;
     std::condition_variable free_cv;
     std::condition_variable_any frame_cv;

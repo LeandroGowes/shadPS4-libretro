@@ -31,6 +31,13 @@ public:
     std::unique_ptr<PortBackend> Open(PortOut& port) override;
 };
 
+#if defined(LIBRETRO_CORE)
+class LibretroAudioOut final : public AudioOutBackend {
+public:
+    std::unique_ptr<PortBackend> Open(PortOut& port) override;
+};
+#endif
+
 class OpenALAudioOut final : public AudioOutBackend {
 public:
     std::unique_ptr<PortBackend> Open(PortOut& port) override;

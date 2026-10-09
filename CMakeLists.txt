@@ -1487,6 +1487,35 @@ if (ENABLE_DISCORD_RPC)
     target_link_libraries(shadps4 PRIVATE discord-rpc)
 endif()
 
+option(ENABLE_LIBRETRO "Build the embedded Libretro core" OFF)
+option(LIBRETRO_STATIC_RUNTIME "Embed MinGW runtime libraries in the Libretro core" ON)
+if(ENABLE_LIBRETRO)
+    add_library(shadps4_libretro SHARED EXCLUDE_FROM_ALL
+        ${AUDIO_CORE} ${IMGUI} ${INPUT} ${COMMON} ${CORE}
+        ${SHADER_RECOMPILER} ${VIDEO_CORE} ${EMULATOR} ${SHADNET}
+        src/libretro_core.cpp src/libretro_audio.cpp)
+    set_target_properties(shadps4_libretro PROPERTIES OUTPUT_NAME "shadps4_libretro" PREFIX "")
+    foreach(property LINK_LIBRARIES INCLUDE_DIRECTORIES COMPILE_DEFINITIONS COMPILE_OPTIONS LINK_OPTIONS)
+        get_target_property(value shadps4 ${property})
+        if(value)
+            set_property(TARGET shadps4_libretro PROPERTY ${property} "${value}")
+        endif()
+    endforeach()
+    target_include_directories(shadps4_libretro PRIVATE externals/libretro)
+    target_compile_definitions(shadps4_libretro PRIVATE LIBRETRO_CORE)
+    if(MINGW)
+        if(LIBRETRO_STATIC_RUNTIME)
+            target_link_options(shadps4_libretro PRIVATE -static)
+        endif()
+        target_compile_options(shadps4_libretro PRIVATE -include atomic)
+        target_compile_options(sirit PRIVATE -include cstdlib)
+        target_compile_definitions(fdk-aac PRIVATE __LP64__)
+        set_source_files_properties(src/core/libraries/ajm/ajm_aac.cpp PROPERTIES COMPILE_DEFINITIONS __LP64__)
+    endif()
+    add_dependencies(shadps4_libretro host_shaders ImGui_Resources)
+    install(TARGETS shadps4_libretro LIBRARY DESTINATION cores RUNTIME DESTINATION cores)
+endif()
+
 # Install rules
 install(TARGETS shadps4 BUNDLE DESTINATION .)
 

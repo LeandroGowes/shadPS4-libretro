@@ -155,36 +155,99 @@ struct AddressSpace::Impl {
             next_addr = reinterpret_cast<VAddr>(info.BaseAddress) + info.RegionSize;
             next_addr = Common::AlignUp(next_addr, alignment);
 
-            // Prevent size from going past supported_user_max
-            u64 size = info.RegionSize;
-            if (next_addr > supported_user_max) {
-                size -= (next_addr - supported_user_max);
-            }
-            size = Common::AlignDown(size, alignment);
-
-            // Check for free memory areas
-            // Restrict region size to avoid overly fragmenting the virtual memory space.
-            if (info.State == MEM_FREE && info.RegionSize > 0x1000000) {
-                VAddr addr = Common::AlignUp(reinterpret_cast<VAddr>(info.BaseAddress), alignment);
-                regions.emplace(addr,
-                                MemoryRegion{addr, PAddr(-1), size, PAGE_NOACCESS, -1, false});
+            // Check for free memory areas. Align both ends independently: aligning
+            // only the base while keeping the original RegionSize can extend a
+            // placeholder reservation into the next VirtualQuery region.
+            if (info.State == MEM_FREE) {
+                const VAddr region_begin =
+                    Common::AlignUp(reinterpret_cast<VAddr>(info.BaseAddress), alignment);
+                const VAddr region_end =
+                    std::min(reinterpret_cast<VAddr>(info.BaseAddress) + info.RegionSize,
+                             supported_user_max);
+                if (region_end > region_begin) {
+                    const u64 size = Common::AlignDown(region_end - region_begin, alignment);
+                    // Restrict region size to avoid overly fragmenting the virtual memory space.
+                    if (size > 0x1000000) {
+                        regions.emplace(region_begin, MemoryRegion{region_begin, PAddr(-1), size,
+                                                                   PAGE_NOACCESS, -1, false});
+                    }
+                }
             }
         }
 
-        // Reserve all detected free regions.
-        for (auto region : regions) {
-            auto addr = static_cast<u8*>(VirtualAlloc2(
-                process, reinterpret_cast<PVOID>(region.second.base), region.second.size,
-                MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS, NULL, 0));
-            // All marked regions should reserve fine since they're free.
-            ASSERT_MSG(addr, "Unable to reserve virtual address space: {}",
-                       Common::GetLastErrorMsg());
+        // Reserve all detected free regions. The core runs inside a long-lived
+        // frontend process, so another runtime thread can allocate host memory
+        // between VirtualQuery and VirtualAlloc2. Recover by rescanning a range
+        // that changed and reserving the still-free intervals independently.
+        const auto reserve_region = [this](VAddr base, u64 size) {
+            return VirtualAlloc2(process, reinterpret_cast<PVOID>(base), size,
+                                 MEM_RESERVE | MEM_RESERVE_PLACEHOLDER, PAGE_NOACCESS, nullptr, 0);
+        };
+        for (auto it = regions.begin(); it != regions.end();) {
+            const auto region = it->second;
+            if (reserve_region(region.base, region.size)) {
+                ++it;
+                continue;
+            }
+
+            const DWORD initial_error = GetLastError();
+            LOG_WARNING(Core,
+                        "Address range changed while reserving {:#x}-{:#x} (Windows {}); "
+                        "rescanning free intervals",
+                        region.base, region.base + region.size, initial_error);
+            it = regions.erase(it);
+
+            const VAddr range_end = region.base + region.size;
+            VAddr scan_addr = region.base;
+            while (scan_addr < range_end) {
+                MEMORY_BASIC_INFORMATION current_info{};
+                if (!VirtualQuery(reinterpret_cast<PVOID>(scan_addr), &current_info,
+                                  sizeof(current_info))) {
+                    break;
+                }
+
+                const VAddr queried_base = reinterpret_cast<VAddr>(current_info.BaseAddress);
+                const VAddr queried_end = queried_base + current_info.RegionSize;
+                const VAddr free_begin =
+                    Common::AlignUp(std::max(region.base, queried_base), alignment);
+                const VAddr free_end =
+                    Common::AlignDown(std::min(range_end, queried_end), alignment);
+                if (current_info.State == MEM_FREE && free_end > free_begin) {
+                    const u64 available_size = free_end - free_begin;
+                    // If the failed reservation still looks wholly free, split
+                    // it so a single transient conflict cannot discard a huge
+                    // virtual range.
+                    const u64 chunk_limit =
+                        available_size == region.size ? (1ULL << 40) : available_size;
+                    for (VAddr chunk_base = free_begin; chunk_base < free_end;) {
+                        const u64 chunk_size = std::min<u64>(chunk_limit, free_end - chunk_base);
+                        if (reserve_region(chunk_base, chunk_size)) {
+                            regions.emplace(chunk_base,
+                                            MemoryRegion{chunk_base, PAddr(-1), chunk_size,
+                                                         PAGE_NOACCESS, -1, false});
+                        } else {
+                            LOG_WARNING(
+                                Core, "Skipping unavailable virtual address range {:#x}-{:#x}: {}",
+                                chunk_base, chunk_base + chunk_size, Common::GetLastErrorMsg());
+                        }
+                        chunk_base += chunk_size;
+                    }
+                }
+
+                scan_addr =
+                    std::max(Common::AlignUp(queried_end, alignment), scan_addr + alignment);
+            }
         }
+        ASSERT_MSG(!regions.empty(), "Failed to reserve any virtual address ranges");
+
+        const auto system_region = regions.lower_bound(SYSTEM_MANAGED_MIN);
+        ASSERT_MSG(system_region != regions.end() && system_region->first <= SYSTEM_MANAGED_MAX,
+                   "Failed to reserve the system-managed virtual address range");
 
         // Set these constants to ensure code relying on them works.
         // These do not fully encapsulate the state of the address space.
-        system_managed_base = reinterpret_cast<u8*>(regions.begin()->first);
-        system_managed_size = SystemManagedSize - (regions.begin()->first - SYSTEM_MANAGED_MIN);
+        system_managed_base = reinterpret_cast<u8*>(system_region->first);
+        system_managed_size = SystemManagedSize - (system_region->first - SYSTEM_MANAGED_MIN);
         system_reserved_base = reinterpret_cast<u8*>(SYSTEM_RESERVED_MIN);
         system_reserved_size = SystemReservedSize;
         user_base = reinterpret_cast<u8*>(USER_MIN);

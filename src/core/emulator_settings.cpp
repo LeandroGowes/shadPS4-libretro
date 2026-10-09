@@ -388,6 +388,13 @@ bool EmulatorSettingsImpl::Load(const std::string& serial) {
             } else {
                 if (std::filesystem::exists(Common::FS::GetUserPath(Common::FS::PathType::UserDir) /
                                             "config.toml")) {
+#if defined(LIBRETRO_CORE)
+                    if (TransferSettings()) {
+                        Save();
+                        return true;
+                    }
+                    LOG_WARNING(Config, "Legacy settings migration failed; using defaults");
+#else
                     SDL_MessageBoxButtonData btns[2]{
                         {0, 0, "Update"},
                         {0, 1, "Defaults"},
@@ -416,6 +423,7 @@ bool EmulatorSettingsImpl::Load(const std::string& serial) {
                             std::quick_exit(1);
                         }
                     }
+#endif
                 }
                 SetDefaultValues();
                 Save();
