@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <map>
+#include <stdexcept>
 #include <fmt/format.h>
 #include "common/alignment.h"
 #include "common/arch.h"
@@ -257,23 +258,53 @@ struct AddressSpace::Impl {
         BackingSize += EmulatorSettings.GetExtraDmemInMBytes() * 1_MB +
                        EmulatorSettings.GetExtraFmemInMBytes() * 1_MB;
 
+        const auto backing_failure = [&](const char* operation, DWORD error) {
+            MEMORYSTATUSEX status{sizeof(MEMORYSTATUSEX)};
+            const bool has_status = GlobalMemoryStatusEx(&status) != 0;
+            const auto message =
+                fmt::format("{} failed (Windows {}: {}). Required backing memory: {} MiB. "
+                            "Available system commit: {} MiB.",
+                            operation, error, Common::NativeErrorToString(error),
+                            BackingSize / 1_MB, has_status ? status.ullAvailPageFile / 1_MB : 0);
+#if defined(LIBRETRO_CORE)
+            if (backing_base) {
+                VirtualFree(backing_base, 0, MEM_RELEASE);
+            }
+            if (backing_handle) {
+                CloseHandle(backing_handle);
+            }
+            for (const auto& [base, region] : regions) {
+                VirtualFree(reinterpret_cast<void*>(base), 0, MEM_RELEASE);
+            }
+            throw std::runtime_error(message);
+#else
+            ASSERT_MSG(false, "{}", message);
+#endif
+        };
+
         // Allocate backing file that represents the total physical memory.
         backing_handle = CreateFileMapping2(INVALID_HANDLE_VALUE, nullptr, FILE_MAP_ALL_ACCESS,
                                             PAGE_EXECUTE_READWRITE, SEC_COMMIT, BackingSize,
                                             nullptr, nullptr, 0);
 
-        ASSERT_MSG(backing_handle, "{}", Common::GetLastErrorMsg());
+        if (!backing_handle) {
+            backing_failure("CreateFileMapping2", GetLastError());
+        }
         // Allocate a virtual memory for the backing file map as placeholder
         backing_base = static_cast<u8*>(VirtualAlloc2(process, nullptr, BackingSize,
                                                       MEM_RESERVE | MEM_RESERVE_PLACEHOLDER,
                                                       PAGE_NOACCESS, nullptr, 0));
-        ASSERT_MSG(backing_base, "{}", Common::GetLastErrorMsg());
+        if (!backing_base) {
+            backing_failure("VirtualAlloc2 (backing)", GetLastError());
+        }
 
         // Map backing placeholder. This will commit the pages
         void* const ret =
             MapViewOfFile3(backing_handle, process, backing_base, 0, BackingSize,
                            MEM_REPLACE_PLACEHOLDER, PAGE_EXECUTE_READWRITE, nullptr, 0);
-        ASSERT_MSG(ret == backing_base, "{}", Common::GetLastErrorMsg());
+        if (ret != backing_base) {
+            backing_failure("MapViewOfFile3 (backing)", GetLastError());
+        }
     }
 
     ~Impl() {

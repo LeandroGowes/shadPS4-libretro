@@ -59,6 +59,9 @@ O patch preserva o commit oficial do submódulo e está incluído no fork.
   estado global que não permitem reinicializar com segurança na mesma instância.
 - A inicialização Libretro não exibe as caixas SDL de migração do standalone.
   Configurações TOML locais são convertidas pelo migrador oficial, quando possível.
+- Falhas na alocação da memória de backing são devolvidas ao frontend pelo log
+  Libretro, com o código original do Windows, tamanho solicitado e memória
+  disponível. A sessão exige outro processo para uma nova tentativa.
 - Savestates, cheats e troca de discos não são implementados nesta integração.
 
 O Promus hospeda a DLL em `promus_core_worker.exe`. Os testes usam esse mesmo
