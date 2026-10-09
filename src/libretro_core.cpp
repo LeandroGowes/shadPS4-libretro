@@ -7,6 +7,7 @@
 #include <array>
 #include <atomic>
 #include <deque>
+#include <exception>
 #include <filesystem>
 #include <mutex>
 #include <string>
@@ -41,6 +42,7 @@ retro_audio_sample_t audio_callback{};
 retro_audio_sample_batch_t audio_batch_callback{};
 retro_input_poll_t input_poll_callback{};
 retro_input_state_t input_state_callback{};
+retro_log_printf_t log_callback{};
 
 struct VideoFrame {
     std::vector<std::uint32_t> pixels;
@@ -245,6 +247,10 @@ RETRO_API void RETRO_CALLCONV retro_init(void) {
     KeepCoreLoadedUntilProcessExit();
     frontend_active.store(true, std::memory_order_relaxed);
     if (environment_callback) {
+        retro_log_callback logging{};
+        if (environment_callback(RETRO_ENVIRONMENT_GET_LOG_INTERFACE, &logging)) {
+            log_callback = logging.log;
+        }
         enum retro_pixel_format format = RETRO_PIXEL_FORMAT_XRGB8888;
         environment_callback(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &format);
         bool support_bitmasks = true;
@@ -301,6 +307,7 @@ RETRO_API void RETRO_CALLCONV retro_deinit(void) {
     audio_batch_callback = nullptr;
     input_poll_callback = nullptr;
     input_state_callback = nullptr;
+    log_callback = nullptr;
 }
 
 RETRO_API void RETRO_CALLCONV retro_get_system_info(struct retro_system_info* info) {
@@ -364,7 +371,16 @@ RETRO_API bool RETRO_CALLCONV retro_load_game(const struct retro_game_info* game
         }
         game_loaded = true;
         return true;
+    } catch (const std::exception& error) {
+        if (log_callback) {
+            log_callback(RETRO_LOG_ERROR, "shadPS4: %s", error.what());
+        }
+        loaded_content.clear();
+        return false;
     } catch (...) {
+        if (log_callback) {
+            log_callback(RETRO_LOG_ERROR, "shadPS4: unknown failure while loading content");
+        }
         loaded_content.clear();
         return false;
     }
