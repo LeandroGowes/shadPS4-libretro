@@ -98,6 +98,9 @@ public:
     void UpdateGyro(const float gyro[3]);
     void UpdateAcceleration(const float acceleration[3]);
     void PollState();
+#if defined(LIBRETRO_CORE)
+    void SetFrontendState(const State& state);
+#endif
     void ResetOrientation();
     void SetLightBarRGB(u8 const r, u8 const g, u8 const b);
     void SetLightBarRGB(Colour const c);

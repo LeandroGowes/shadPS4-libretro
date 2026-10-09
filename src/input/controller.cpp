@@ -117,6 +117,18 @@ void GameController::UpdateAcceleration(const float acceleration[3]) {
     std::memcpy(accel_buf, acceleration, sizeof(accel_buf));
 }
 
+#if defined(LIBRETRO_CORE)
+void GameController::SetFrontendState(const State& state) {
+    std::lock_guard lock{m_state_mutex};
+    const bool connected = m_state.connected;
+    const u8 connected_count = m_state.connected_count;
+    m_state = state;
+    m_state.connected = connected;
+    m_state.connected_count = connected_count;
+    PushStateLocked(state.time);
+}
+#endif
+
 void GameController::PollState() {
     std::lock_guard lock{m_state_mutex};
     PushStateLocked();
@@ -270,6 +282,17 @@ bool GameController::SetVibration(u8 smallMotor, u8 largeMotor) {
 static bool is_first_check = true;
 
 void GameControllers::TryOpenSDLControllers() {
+#if defined(LIBRETRO_CORE)
+    if (is_first_check) {
+        is_first_check = false;
+        auto user = UserManagement.GetUserByPlayerIndex(1);
+        ASSERT(user != nullptr);
+        controllers[0]->user_id = user->user_id;
+        controllers[0]->ConnectController(nullptr);
+        UserManagement.LoginUser(user, 1);
+    }
+    return;
+#endif
     using namespace Libraries::UserService;
     int controller_count;
     SDL_JoystickID* new_joysticks = SDL_GetGamepads(&controller_count);

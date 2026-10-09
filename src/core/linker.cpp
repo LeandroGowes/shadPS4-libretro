@@ -146,7 +146,7 @@ void Linker::Execute(const std::vector<std::string>& args) {
 
     memory->SetupMemoryRegions(fmem_size, use_extended_mem1, use_extended_mem2);
 
-    main_thread.Run([this, module, &args, has_libcinternal](std::stop_token) {
+    main_thread.Run([this, module, args, has_libcinternal](std::stop_token) {
         Common::SetCurrentThreadName("Game:Main");
 
 #ifndef _WIN32 // Clear any existing signal mask for game threads.
