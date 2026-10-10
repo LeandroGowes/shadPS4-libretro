@@ -36,6 +36,8 @@ bld/
 [Ll]ogs/
 [Bb]uild/
 /build-libretro/
+/build-libretro-linux/
+/build-libretro-portable/
 
 # Visual Studio 2015/2017 cache/options directory
 .vs/

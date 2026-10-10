@@ -33,7 +33,12 @@
 #ifdef _WIN64
 #include <Rpc.h>
 #else
+#if defined(LIBRETRO_CORE) && defined(__linux__)
+#include <cerrno>
+#include <sys/random.h>
+#else
 #include <uuid/uuid.h>
+#endif
 #endif
 #include <common/singleton.h>
 #include <core/linker.h>
@@ -175,8 +180,25 @@ s32 PS4_SYSV_ABI sceKernelUuidCreate(OrbisKernelUuid* orbisUuid) {
         return ORBIS_KERNEL_ERROR_EFAULT;
     }
 #else
+#if defined(LIBRETRO_CORE) && defined(__linux__)
+    unsigned char uuid[16];
+    std::size_t offset = 0;
+    while (offset < sizeof(uuid)) {
+        const auto count = getrandom(uuid + offset, sizeof(uuid) - offset, 0);
+        if (count < 0 && errno == EINTR) {
+            continue;
+        }
+        if (count <= 0) {
+            return ORBIS_KERNEL_ERROR_EFAULT;
+        }
+        offset += static_cast<std::size_t>(count);
+    }
+    uuid[6] = static_cast<u8>((uuid[6] & 0x0f) | 0x40);
+    uuid[8] = static_cast<u8>((uuid[8] & 0x3f) | 0x80);
+#else
     uuid_t uuid;
     uuid_generate(uuid);
+#endif
 #endif
     std::memcpy(orbisUuid, &uuid, sizeof(OrbisKernelUuid));
     return ORBIS_OK;

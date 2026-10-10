@@ -1488,7 +1488,7 @@ if (ENABLE_DISCORD_RPC)
 endif()
 
 option(ENABLE_LIBRETRO "Build the embedded Libretro core" OFF)
-option(LIBRETRO_STATIC_RUNTIME "Embed MinGW runtime libraries in the Libretro core" ON)
+option(LIBRETRO_STATIC_RUNTIME "Embed compiler runtime libraries in the Libretro core" ON)
 if(ENABLE_LIBRETRO)
     add_library(shadps4_libretro SHARED EXCLUDE_FROM_ALL
         ${AUDIO_CORE} ${IMGUI} ${INPUT} ${COMMON} ${CORE}
@@ -1503,6 +1503,20 @@ if(ENABLE_LIBRETRO)
     endforeach()
     target_include_directories(shadps4_libretro PRIVATE externals/libretro)
     target_compile_definitions(shadps4_libretro PRIVATE LIBRETRO_CORE)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # A libretro frontend supplies input; SDL/libusb udev hotplug is not
+        # needed here and would otherwise add a runtime libudev dependency.
+        get_target_property(libretro_links shadps4_libretro LINK_LIBRARIES)
+        list(REMOVE_ITEM libretro_links uuid)
+        set_property(TARGET shadps4_libretro PROPERTY LINK_LIBRARIES "${libretro_links}")
+        set_target_properties(shadps4_libretro PROPERTIES
+            BUILD_RPATH "" INSTALL_RPATH "")
+        target_link_options(shadps4_libretro PRIVATE -Wl,-z,defs -Wl,-Bsymbolic
+            -Wl,--exclude-libs,ALL -Wl,--disable-new-dtags)
+        if(LIBRETRO_STATIC_RUNTIME)
+            target_link_options(shadps4_libretro PRIVATE -static-libstdc++ -static-libgcc)
+        endif()
+    endif()
     if(MINGW)
         if(LIBRETRO_STATIC_RUNTIME)
             target_link_options(shadps4_libretro PRIVATE -static)

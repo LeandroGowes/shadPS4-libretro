@@ -71,7 +71,67 @@ e o log `shadPS4-libretro/log/shad_log.txt`.
 
 ## Linux
 
-O upstream suporta Linux. Este alvo possui caminhos Linux, mas esta integração
-local ainda não foi compilada ou testada nesse sistema. É necessário gerar uma
-compilação separada, `shadps4_libretro.so`, com as dependências de build descritas
-em `documents/building-linux.md`. A DLL de Windows não é um núcleo Linux.
+Compile com Git, CMake 3.24+, Ninja e Clang, usando as dependências de build
+descritas em `documents/building-linux.md`:
+
+```bash
+./scripts/build-libretro-linux.sh
+# Para ajustar o paralelismo:
+JOBS=4 ./scripts/build-libretro-linux.sh
+```
+
+O resultado fica em `build-libretro-linux/dist/shadps4_libretro.so`. O core
+Linux pode ser distribuído como um único `.so`; não precisa de `cores/lib`.
+SDL, OpenAL, FFmpeg, compressão, fontes de interface, shaders e runtime C++
+ficam incorporados ao core. `LIBRETRO_STATIC_RUNTIME=OFF` permite usar o runtime
+C++ compartilhado. A configuração usa as dependências fixadas no repositório,
+sem substituir por versões de desenvolvimento instaladas no sistema.
+
+O vínculo Linux resolve os símbolos dentro do core e oculta os símbolos das
+bibliotecas estáticas. Isso permite incorporar os arquivos FFmpeg fornecidos
+pelo upstream e evita misturar o runtime C++ do core com o do frontend.
+
+Ainda são necessários glibc, o driver/loader Vulkan do sistema e, quando um jogo
+exigir, módulos e fontes extraídos do PS4 no diretório de BIOS do frontend.
+Esses arquivos do console não são incluídos na distribuição. O binário produzido
+usa a glibc da máquina de build; para suportar distribuições mais antigas,
+compile no sistema mais antigo que deseja suportar. O alvo x86-64 requer AVX2.
+
+Validação local: Clang 22.1.8, Linux x86-64, Burnout Paradise Remastered
+(`CUSA10866`), host Linux do Promus em processo isolado. O pacote final passou
+6.000 iterações em 100 segundos com vídeo 1920x1080, áudio 48 kHz e controles.
+O encerramento e a reabertura são verificados separadamente em dois processos.
+Esse teste verifica inicialização e execução inicial, não uma partida completa.
+Savestates continuam indisponíveis. Use sempre um processo novo para cada sessão.
+
+### Pacote com base antiga
+
+Para distribuir entre distros, prefira a compilação isolada Ubuntu 22.04:
+
+```bash
+./scripts/build-libretro-portable.sh
+```
+
+O host precisa de Bubblewrap (`bwrap`), curl, tar, Git, ripgrep e binutils.
+O script prepara Ubuntu Base 22.04.5 e GCC 14 dentro de
+`build-libretro-portable/rootfs`, sem sudo ou alterar os pacotes do host.
+O ambiente de compilação precisa de rede; o pacote final não precisa dele.
+A imagem base vem de `https://cdimage.ubuntu.com/ubuntu-base/releases/22.04/release/`
+e seu SHA-256 fica fixado no script.
+
+Distribuição: `build-libretro-portable/shadps4-libretro-linux-x86_64.tar.gz`.
+O core fica em `build-libretro-portable/build/dist/shadps4_libretro.so`, com
+`release-metadata.json` e `shadps4_libretro.so.sha256` na mesma pasta. O script
+também cria um checksum `.sha256` ao lado do arquivo tar.gz.
+O core Linux e distribuído como um único `.so`: UUID v4 usa `getrandom()` e os
+backends SDL/libusb não dependem de libudev. O script verifica as dependências
+ELF e falha se houver uma biblioteca de runtime fora da glibc do sistema ou se
+o pacote exigir glibc acima de 2.35. O runtime C++ continua incorporado.
+
+Essa base permite uso em distribuições x86-64 com glibc 2.35 ou posterior e CPU
+x86-64-v3/AVX2, com frontend e Vulkan já instalados. Sistemas com musl, glibc
+mais antiga ou outra arquitetura precisam de uma compilação diferente.
+O carregamento e a API Libretro foram verificados no ambiente Ubuntu 22.04.
+No host Linux do Promus, Burnout Paradise Remastered passou 6.000 iterações
+em 100 segundos, com vídeo 1920x1080, áudio e controles. O teste cobre a execução
+inicial; não comprova uma partida completa nem todas as distribuições.
