@@ -314,7 +314,7 @@ RETRO_API void RETRO_CALLCONV retro_get_system_info(struct retro_system_info* in
     if (!info)
         return;
     *info = {};
-    info->library_name = "shadPS4";
+    info->library_name = "shadPS4 (Libretro - Promus)";
     static const std::string version = std::string{Common::g_version} + "-libretro";
     info->library_version = version.c_str();
     info->valid_extensions = "bin|elf|zar";
