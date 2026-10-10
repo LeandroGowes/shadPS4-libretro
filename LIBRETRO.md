@@ -1,11 +1,11 @@
-# shadPS4 official: núcleo Libretro local para Promus Play
+# shadPS4 Libretro para Promus Play
 
 Base de emulação: https://github.com/shadps4-emu/shadPS4
 
 Revisão usada: `0fe263a4760dfbfa973366890061749b4af0de97` (main, 0.19.1 WIP).
-O código de integração Libretro foi reaproveitado e portado da integração local
-anterior; o emulador, kernel, decodificação e renderizador são os desta revisão
-oficial. Esta DLL é uma compilação local, não um lançamento oficial do projeto.
+Emulação desenvolvida pelo projeto shadPS4. Integração libretro e adaptações
+para o Promus Play, incluindo vídeo, áudio, controles e execução pelo frontend.
+Esta DLL é uma compilação deste fork, não um lançamento oficial do shadPS4.
 
 ## Compilação Windows
 
