@@ -3,6 +3,15 @@ name: Cores Libretro — Windows e Linux (manual)
 on:
   workflow_dispatch:
     inputs:
+      platform:
+        description: Plataformas para compilar
+        required: true
+        type: choice
+        default: both
+        options:
+          - both
+          - windows
+          - linux
       revision:
         description: Commit ou tag para compilar (vazio usa a revisão desta execução)
         required: false
@@ -25,6 +34,7 @@ jobs:
         run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   windows:
+    if: ${{ inputs.platform != 'linux' }}
     needs: source
     runs-on: windows-2022
     timeout-minutes: 180
@@ -43,7 +53,8 @@ jobs:
       - name: Ferramentas fixadas
         shell: pwsh
         run: |
-          python -m pip install cmake==3.31.8 ninja==1.11.1.4
+          python -m pip install cmake==3.31.10 ninja==1.11.1.4
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao instalar CMake e Ninja.' }
           $toolDir = Join-Path $env:RUNNER_TEMP 'llvm-mingw'
           New-Item -ItemType Directory -Path $toolDir -Force | Out-Null
           Invoke-WebRequest 'https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/llvm-mingw-20260922-ucrt-x86_64.zip' -OutFile "$toolDir/compiler.zip"
@@ -68,6 +79,7 @@ jobs:
           retention-days: 7
 
   linux:
+    if: ${{ inputs.platform != 'windows' }}
     needs: source
     runs-on: ubuntu-22.04
     timeout-minutes: 180
