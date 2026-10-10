@@ -135,3 +135,14 @@ O carregamento e a API Libretro foram verificados no ambiente Ubuntu 22.04.
 No host Linux do Promus, Burnout Paradise Remastered passou 6.000 iterações
 em 100 segundos, com vídeo 1920x1080, áudio e controles. O teste cobre a execução
 inicial; não comprova uma partida completa nem todas as distribuições.
+
+## Compilação manual no GitHub Actions
+
+Em Actions, escolha **Cores Libretro — Windows e Linux (manual)** e clique em
+**Run workflow**. Deixe `revision` vazio para compilar a revisão da execução,
+ou informe um commit/tag que contenha os scripts libretro Windows e Linux.
+Os dois jobs usam o mesmo commit resolvido. Ao finalizar, baixe os dois
+artifacts na página da execução; ficam disponíveis por sete dias.
+Windows entrega um ZIP com DLL/licenças/metadados. Linux entrega o pacote
+portátil com `.so`, licenças/metadados e hashes. Não há publicação de release
+nem execução de jogos. Compilar com sucesso não comprova compatibilidade.
