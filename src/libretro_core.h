@@ -10,6 +10,7 @@
 
 namespace Libretro {
 
+void ApplyCoreOptions();
 void SubmitVideoFrame(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height,
                       std::size_t pitch);
 void SubmitAudioSamples(const std::int16_t* samples, std::size_t frames);

@@ -146,3 +146,28 @@ artifacts na pÃ¡gina da execuÃ§Ã£o; ficam disponÃ­veis por sete dias.
 Windows entrega um ZIP com DLL/licenÃ§as/metadados. Linux entrega o pacote
 portÃ¡til com `.so`, licenÃ§as/metadados e hashes. NÃ£o hÃ¡ publicaÃ§Ã£o de release
 nem execuÃ§Ã£o de jogos. Compilar com sucesso nÃ£o comprova compatibilidade.
+
+
+## Opções do core
+
+O frontend recebe 15 opções pela API `SET_VARIABLES`/`GET_VARIABLE`, compatível
+com Promus e RetroArch. Todas são aplicadas ao abrir o jogo e exigem encerrar e
+abrir novamente a sessão quando alteradas. `native` mantém a configuração do
+emulador, incluindo o arquivo específico do jogo, quando existente. As outras
+escolhas têm prioridade sobre esse arquivo apenas na sessão; o core não grava
+nem modifica as configurações originais.
+
+As opções cobrem PS4 Pro, modo de desenvolvimento, idioma da console (ID PS4),
+botão de confirmação, leitura de memória/imagens GPU, acesso direto à memória,
+cópia de buffers, dispositivo Vulkan, cache de pipelines e diagnóstico de
+Vulkan/shaders/executáveis. Os valores aplicados são registrados no log do core.
+A aplicação ocorre depois de `EmulatorSettings.Load(id)` e antes da criação dos
+subsistemas do jogo, usando os setters oficiais com override de sessão.
+
+Tela cheia, escala do frontend e dispositivos de áudio não são expostos aqui:
+o frontend controla a apresentação e a saída libretro usa seu próprio backend.
+FSR/HDR e opções da interface standalone também não foram incluídas quando o
+caminho de apresentação libretro não as utiliza. Recursos de rede, perfis e
+periféricos precisam de integração própria e não são simulados por opções.
+As opções de diagnóstico podem aumentar uso de disco e custo de execução;
+as configurações GPU avançadas podem afetar a compatibilidade dos jogos.
