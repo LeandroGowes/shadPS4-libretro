@@ -45,6 +45,7 @@
 #include "core/memory.h"
 #include "core/user_settings.h"
 #include "emulator.h"
+#include "libretro_core.h"
 #include "video_core/cache_storage.h"
 #include "video_core/renderdoc.h"
 
@@ -435,6 +436,9 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
     }
 
     EmulatorSettings.Load(id);
+#if defined(LIBRETRO_CORE)
+    Libretro::ApplyCoreOptions();
+#endif
     // Switch to configured log
     Common::Log::Switch((!id.empty() && EmulatorSettings.IsLogSeparate()) ? id + ".log"
                                                                           : "shad_log.txt",

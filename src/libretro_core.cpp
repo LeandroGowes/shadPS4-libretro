@@ -61,6 +61,34 @@ bool session_started{};
 std::atomic_bool frontend_active{true};
 constexpr std::size_t kMaxQueuedAudioFrames = 48000 * 2;
 
+static const retro_variable core_options[] = {
+    {"shadps4_neo_mode", "Console: modo PS4 Pro (reiniciar jogo); native|disabled|enabled"},
+    {"shadps4_devkit_mode", "Console: modo de desenvolvimento (reiniciar jogo); native|disabled|enabled"},
+    {"shadps4_console_language", "Console: idioma (ID PS4) (reiniciar jogo); native|1|17|0|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|18|19|20|21|22|23|24|25|26|27|28|29"},
+    {"shadps4_circle_enter", "Controle: confirmar com Circle (reiniciar jogo); native|disabled|enabled"},
+    {"shadps4_readbacks", "GPU: leitura de memoria (reiniciar jogo); native|disabled|relaxed|precise"},
+    {"shadps4_readback_linear", "GPU: leitura de imagens lineares (reiniciar jogo); native|disabled|enabled"},
+    {"shadps4_direct_memory", "GPU: acesso direto a memoria (reiniciar jogo); native|disabled|enabled"},
+    {"shadps4_copy_gpu_buffers", "GPU: copiar buffers (reiniciar jogo); native|disabled|enabled"},
+    {"shadps4_gpu", "Vulkan: dispositivo (indice) (reiniciar jogo); native|auto|0|1|2|3"},
+    {"shadps4_pipeline_cache", "Vulkan: cache de pipelines (reiniciar jogo); native|disabled|enabled"},
+    {"shadps4_validation", "Diagnostico: validacao Vulkan (reiniciar jogo); native|disabled|enabled"},
+    {"shadps4_validation_sync", "Diagnostico: validacao de sincronizacao Vulkan (reiniciar jogo); native|disabled|enabled"},
+    {"shadps4_dump_shaders", "Diagnostico: salvar shaders no disco (reiniciar jogo); native|disabled|enabled"},
+    {"shadps4_shader_collect", "Diagnostico: coletar shaders (reiniciar jogo); native|disabled|enabled"},
+    {"shadps4_debug_dump", "Diagnostico: salvar executaveis no disco (reiniciar jogo); native|disabled|enabled"},
+    {nullptr, nullptr},
+};
+
+std::string_view GetCoreOption(const char* key) {
+    retro_variable variable{key, nullptr};
+    if (!environment_callback || !environment_callback(RETRO_ENVIRONMENT_GET_VARIABLE, &variable) ||
+        !variable.value) {
+        return "native";
+    }
+    return variable.value;
+}
+
 void KeepCoreLoadedUntilProcessExit() {
 #if defined(_WIN32)
     HMODULE module{};
@@ -176,6 +204,101 @@ extern "C" RETRO_API void RETRO_CALLCONV retro_unload_game(void);
 
 namespace Libretro {
 
+void ApplyCoreOptions() {
+    if (const auto value = GetCoreOption("shadps4_neo_mode"); value != "native") {
+        if (value == "enabled" || value == "disabled") {
+            EmulatorSettings.SetNeo(value == "enabled", true);
+            LOG_INFO(Config, "Libretro option shadps4_neo_mode: {}", value);
+        }
+    }
+    if (const auto value = GetCoreOption("shadps4_devkit_mode"); value != "native") {
+        if (value == "enabled" || value == "disabled") {
+            EmulatorSettings.SetDevKit(value == "enabled", true);
+            LOG_INFO(Config, "Libretro option shadps4_devkit_mode: {}", value);
+        }
+    }
+    if (const auto value = GetCoreOption("shadps4_console_language"); value != "native") {
+        if (value == "1" || value == "17" || value == "0" || value == "2" || value == "3" || value == "4" || value == "5" || value == "6" || value == "7" || value == "8" || value == "9" || value == "10" || value == "11" || value == "12" || value == "13" || value == "14" || value == "15" || value == "16" || value == "18" || value == "19" || value == "20" || value == "21" || value == "22" || value == "23" || value == "24" || value == "25" || value == "26" || value == "27" || value == "28" || value == "29") {
+            EmulatorSettings.SetConsoleLanguage(std::stoi(std::string{value}), true);
+            LOG_INFO(Config, "Libretro option shadps4_console_language: {}", value);
+        }
+    }
+    if (const auto value = GetCoreOption("shadps4_circle_enter"); value != "native") {
+        if (value == "enabled" || value == "disabled") {
+            EmulatorSettings.SetCircleEnter(value == "enabled", true);
+            LOG_INFO(Config, "Libretro option shadps4_circle_enter: {}", value);
+        }
+    }
+    if (const auto value = GetCoreOption("shadps4_readbacks"); value != "native") {
+        if (value == "disabled" || value == "relaxed" || value == "precise") {
+            EmulatorSettings.SetReadbacksMode(value == "precise" ? GpuReadbacksMode::Precise :
+                value == "relaxed" ? GpuReadbacksMode::Relaxed : GpuReadbacksMode::Disabled, true);
+            LOG_INFO(Config, "Libretro option shadps4_readbacks: {}", value);
+        }
+    }
+    if (const auto value = GetCoreOption("shadps4_readback_linear"); value != "native") {
+        if (value == "enabled" || value == "disabled") {
+            EmulatorSettings.SetReadbackLinearImagesEnabled(value == "enabled", true);
+            LOG_INFO(Config, "Libretro option shadps4_readback_linear: {}", value);
+        }
+    }
+    if (const auto value = GetCoreOption("shadps4_direct_memory"); value != "native") {
+        if (value == "enabled" || value == "disabled") {
+            EmulatorSettings.SetDirectMemoryAccessEnabled(value == "enabled", true);
+            LOG_INFO(Config, "Libretro option shadps4_direct_memory: {}", value);
+        }
+    }
+    if (const auto value = GetCoreOption("shadps4_copy_gpu_buffers"); value != "native") {
+        if (value == "enabled" || value == "disabled") {
+            EmulatorSettings.SetCopyGpuBuffers(value == "enabled", true);
+            LOG_INFO(Config, "Libretro option shadps4_copy_gpu_buffers: {}", value);
+        }
+    }
+    if (const auto value = GetCoreOption("shadps4_gpu"); value != "native") {
+        if (value == "auto" || value == "0" || value == "1" || value == "2" || value == "3") {
+            EmulatorSettings.SetGpuId(value == "auto" ? -1 : std::stoi(std::string{value}), true);
+            LOG_INFO(Config, "Libretro option shadps4_gpu: {}", value);
+        }
+    }
+    if (const auto value = GetCoreOption("shadps4_pipeline_cache"); value != "native") {
+        if (value == "enabled" || value == "disabled") {
+            EmulatorSettings.SetPipelineCacheEnabled(value == "enabled", true);
+            LOG_INFO(Config, "Libretro option shadps4_pipeline_cache: {}", value);
+        }
+    }
+    if (const auto value = GetCoreOption("shadps4_validation"); value != "native") {
+        if (value == "enabled" || value == "disabled") {
+            EmulatorSettings.SetVkValidationEnabled(value == "enabled", true);
+            LOG_INFO(Config, "Libretro option shadps4_validation: {}", value);
+        }
+    }
+    if (const auto value = GetCoreOption("shadps4_validation_sync"); value != "native") {
+        if (value == "enabled" || value == "disabled") {
+            EmulatorSettings.SetVkValidationSyncEnabled(value == "enabled", true);
+            LOG_INFO(Config, "Libretro option shadps4_validation_sync: {}", value);
+        }
+    }
+    if (const auto value = GetCoreOption("shadps4_dump_shaders"); value != "native") {
+        if (value == "enabled" || value == "disabled") {
+            EmulatorSettings.SetDumpShaders(value == "enabled", true);
+            LOG_INFO(Config, "Libretro option shadps4_dump_shaders: {}", value);
+        }
+    }
+    if (const auto value = GetCoreOption("shadps4_shader_collect"); value != "native") {
+        if (value == "enabled" || value == "disabled") {
+            EmulatorSettings.SetShaderCollect(value == "enabled", true);
+            LOG_INFO(Config, "Libretro option shadps4_shader_collect: {}", value);
+        }
+    }
+    if (const auto value = GetCoreOption("shadps4_debug_dump"); value != "native") {
+        if (value == "enabled" || value == "disabled") {
+            EmulatorSettings.SetDebugDump(value == "enabled", true);
+            LOG_INFO(Config, "Libretro option shadps4_debug_dump: {}", value);
+        }
+    }
+}
+
+
 void SubmitVideoFrame(const std::uint8_t* rgba, std::uint32_t width, std::uint32_t height,
                       std::size_t pitch) {
     if (!frontend_active.load(std::memory_order_relaxed) || !rgba || width == 0 || height == 0 ||
@@ -225,6 +348,9 @@ RETRO_API unsigned RETRO_CALLCONV retro_api_version(void) {
 
 RETRO_API void RETRO_CALLCONV retro_set_environment(retro_environment_t cb) {
     environment_callback = cb;
+    if (cb) {
+        cb(RETRO_ENVIRONMENT_SET_VARIABLES, const_cast<retro_variable*>(core_options));
+    }
 }
 RETRO_API void RETRO_CALLCONV retro_set_video_refresh(retro_video_refresh_t cb) {
     video_callback = cb;
