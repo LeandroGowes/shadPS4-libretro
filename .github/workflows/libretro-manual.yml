@@ -1,0 +1,99 @@
+name: Cores Libretro — Windows e Linux (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Commit ou tag para compilar (vazio usa a revisão desta execução)
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-22.04
+    outputs:
+      commit: ${{ steps.resolve.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.revision || github.sha }}
+      - id: resolve
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  windows:
+    needs: source
+    runs-on: windows-2022
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+          submodules: recursive
+      - name: Receita de empacotamento desta execução
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.sha }}
+          path: _ci
+          sparse-checkout: .github/scripts
+          persist-credentials: false
+      - name: Ferramentas fixadas
+        shell: pwsh
+        run: |
+          python -m pip install cmake==3.31.8 ninja==1.11.1.4
+          $toolDir = Join-Path $env:RUNNER_TEMP 'llvm-mingw'
+          New-Item -ItemType Directory -Path $toolDir -Force | Out-Null
+          Invoke-WebRequest 'https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/llvm-mingw-20260922-ucrt-x86_64.zip' -OutFile "$toolDir/compiler.zip"
+          Expand-Archive "$toolDir/compiler.zip" -DestinationPath $toolDir
+          "LLVM_ROOT=$toolDir/llvm-mingw-20260922-ucrt-x86_64" >> $env:GITHUB_ENV
+      - name: Compilar DLL Windows
+        shell: pwsh
+        run: ./scripts/build-libretro-windows.ps1 -CompilerBin "$env:LLVM_ROOT/bin" -Jobs 2
+      - name: Empacotar DLL, licenças e metadados
+        shell: pwsh
+        run: |
+          python _ci/.github/scripts/package-libretro-windows.py
+          Get-Content dist/windows/SHA256SUMS-windows.txt >> $env:GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shadps4-libretro-windows-x86_64
+          path: |
+            dist/windows/*.zip
+            dist/windows/build-info-windows.json
+            dist/windows/SHA256SUMS-windows.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  linux:
+    needs: source
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+          submodules: recursive
+      - name: Preparar ambiente Linux portátil
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap ripgrep curl binutils
+      - name: Compilar core Linux portátil
+        env:
+          JOBS: '2'
+        run: bash scripts/build-libretro-portable.sh
+      - name: Registrar revisão e hash
+        run: |
+          cat build-libretro-portable/build/dist/release-metadata.json >> "$GITHUB_STEP_SUMMARY"
+          cat build-libretro-portable/shadps4-libretro-linux-x86_64.tar.gz.sha256 >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shadps4-libretro-linux-x86_64
+          path: |
+            build-libretro-portable/shadps4-libretro-linux-x86_64.tar.gz
+            build-libretro-portable/shadps4-libretro-linux-x86_64.tar.gz.sha256
+            build-libretro-portable/build/dist/release-metadata.json
+          if-no-files-found: error
+          retention-days: 7

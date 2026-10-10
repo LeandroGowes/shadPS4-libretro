@@ -4,17 +4,6 @@
 name: Build and Release
 
 on:
-  push:
-    branches-ignore: [Pre-release-shadPS4-*]
-    paths-ignore:
-      - "documents/**"
-      - "**/*.md"
-
-  pull_request:
-    paths-ignore:
-      - "documents/**"
-      - "**/*.md"
-
   workflow_dispatch:
 
 concurrency:
