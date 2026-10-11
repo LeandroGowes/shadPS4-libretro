@@ -16,6 +16,8 @@ public:
     virtual void Output(void* ptr) = 0;
 
     virtual void SetVolume(const std::array<int, 8>& ch_volumes) = 0;
+
+    virtual void SetMixLevelPadSpk(int /*mix_level*/) {}
 };
 
 class AudioOutBackend {

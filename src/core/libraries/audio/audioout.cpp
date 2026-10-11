@@ -349,6 +349,7 @@ s32 PS4_SYSV_ABI sceAudioOutOpen(UserService::OrbisUserServiceUserId user_id,
 
         // Set initial volume
         port->impl->SetVolume(port->volume);
+        port->impl->SetMixLevelPadSpk(port->mixLevelPadSpk);
 
     } catch (const std::bad_alloc&) {
         return ORBIS_AUDIO_OUT_ERROR_OUT_OF_MEMORY;
@@ -807,7 +808,9 @@ s32 PS4_SYSV_ABI sceAudioOutSetMixLevelPadSpk(s32 handle, s32 mixLevel) {
 
     std::unique_lock lock{port->mutex};
     port->mixLevelPadSpk = mixLevel;
-    // TODO: Apply mix level to backend
+    if (port->impl) {
+        port->impl->SetMixLevelPadSpk(mixLevel);
+    }
 
     return ORBIS_OK;
 }
