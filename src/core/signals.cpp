@@ -53,13 +53,34 @@ static LONG WINAPI SignalHandler(EXCEPTION_POINTERS* pExp) noexcept {
     bool handled = false;
     bool static_protection_exception = false; // Windows static guest red-zone protection
     switch (code) {
-    case EXCEPTION_ACCESS_VIOLATION:
+    case EXCEPTION_ACCESS_VIOLATION: {
         guest_info._si_signo = POSIX_SIGSEGV;
         guest_info._si_code = POSIX_SEGV_MAPERR;
         static_protection_exception = true; // Windows static guest red-zone protection
         handled = signals->DispatchAccessViolation(
             pExp, reinterpret_cast<void*>(pExp->ExceptionRecord->ExceptionInformation[1]));
+        if (!handled && pExp != nullptr && pExp->ExceptionRecord != nullptr &&
+            pExp->ContextRecord != nullptr) {
+            const uintptr_t fault_target = pExp->ExceptionRecord->ExceptionInformation[1];
+            if (fault_target < 0x1000) {
+                auto* ctx = pExp->ContextRecord;
+                ZydisDecodedInstruction instruction;
+                ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
+                if (ZYAN_SUCCESS(Common::Decoder::Instance()->decodeInstruction(
+                        instruction, operands, reinterpret_cast<void*>(ctx->Rip)))) {
+                    if (instruction.mnemonic == ZYDIS_MNEMONIC_VMULSS ||
+                        instruction.mnemonic == ZYDIS_MNEMONIC_MULSS) {
+                        LOG_INFO(Debug,
+                                 "Recovered from null dereference in {} at RIP {:#x}, advancing instruction",
+                                 ZydisMnemonicGetString(instruction.mnemonic), ctx->Rip);
+                        ctx->Rip += instruction.length;
+                        handled = true;
+                    }
+                }
+            }
+        }
         break;
+    }
     case EXCEPTION_ILLEGAL_INSTRUCTION:
         guest_info._si_signo = POSIX_SIGILL;
         guest_info._si_code = POSIX_ILL_ILLOPC;
@@ -139,10 +160,49 @@ static LONG WINAPI SignalHandler(EXCEPTION_POINTERS* pExp) noexcept {
         }
     }
 
+    static std::atomic<bool> in_unhandled_report{false};
+    if (in_unhandled_report.exchange(true)) {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
     const bool report_unhandled =
         use_static_windows_guest_red_zone_protection ? static_protection_exception : true;
     if (report_unhandled) {
         LOG_CRITICAL(Debug, "Unhandled Exception code {:#x} at {}", code, address);
+        if (pExp != nullptr && pExp->ExceptionRecord != nullptr) {
+            LOG_CRITICAL(Debug, "Exception detail: op={:#x}, fault_target={:#x}",
+                         pExp->ExceptionRecord->ExceptionInformation[0],
+                         pExp->ExceptionRecord->ExceptionInformation[1]);
+        }
+        if (pExp != nullptr && pExp->ContextRecord != nullptr) {
+            auto* ctx = pExp->ContextRecord;
+            LOG_CRITICAL(Debug, "Registers: RAX={:#018x} RBX={:#018x} RCX={:#018x} RDX={:#018x}",
+                         ctx->Rax, ctx->Rbx, ctx->Rcx, ctx->Rdx);
+            LOG_CRITICAL(Debug, "           RSI={:#018x} RDI={:#018x} RBP={:#018x} RSP={:#018x}",
+                         ctx->Rsi, ctx->Rdi, ctx->Rbp, ctx->Rsp);
+            LOG_CRITICAL(Debug, "           R8 ={:#018x} R9 ={:#018x} R10={:#018x} R11={:#018x}",
+                         ctx->R8, ctx->R9, ctx->R10, ctx->R11);
+            LOG_CRITICAL(Debug, "           R12={:#018x} R13={:#018x} R14={:#018x} R15={:#018x}",
+                         ctx->R12, ctx->R13, ctx->R14, ctx->R15);
+            LOG_CRITICAL(Debug, "           RIP={:#018x} RFLAGS={:#010x}",
+                         ctx->Rip, ctx->EFlags);
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (VirtualQuery(reinterpret_cast<void*>(ctx->Rip), &mbi, sizeof(mbi)) &&
+                mbi.State == MEM_COMMIT && !(mbi.Protect & PAGE_NOACCESS)) {
+                ZydisDecodedInstruction instruction;
+                ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
+                if (ZYAN_SUCCESS(Common::Decoder::Instance()->decodeInstruction(
+                        instruction, operands, reinterpret_cast<void*>(ctx->Rip)))) {
+                    LOG_CRITICAL(Debug, "Instruction at RIP: {}",
+                                 Common::Decoder::Instance()->disassembleInst(instruction, operands, ctx->Rip));
+                }
+            } else {
+                LOG_CRITICAL(Debug, "Instruction at RIP cannot be read (uncommitted/noaccess)");
+            }
+        }
+        Common::Log::Flush();
+        fflush(stdout);
+        fflush(stderr);
         Common::Singleton<Core::Emulator>::Instance()->Shutdown();
     }
 
