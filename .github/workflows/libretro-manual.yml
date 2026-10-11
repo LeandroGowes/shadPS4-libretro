@@ -17,9 +17,24 @@ on:
         required: false
         type: string
         default: ''
+      create_release:
+        description: Criar Release no GitHub automaticamente ao concluir?
+        required: false
+        type: boolean
+        default: true
+      draft:
+        description: Criar em modo rascunho (Draft)? Se falso, publica direto.
+        required: false
+        type: boolean
+        default: false
+      tag_name:
+        description: Tag da Release (ex. v0.19.1-libretro-promus.3; vazio gera tag automática)
+        required: false
+        type: string
+        default: ''
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   source:
@@ -109,3 +124,44 @@ jobs:
             build-libretro-portable/build/dist/release-metadata.json
           if-no-files-found: error
           retention-days: 7
+
+  release:
+    if: ${{ always() && inputs.create_release && (needs.windows.result == 'success' || needs.linux.result == 'success') }}
+    needs: [source, windows, linux]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Baixar artefatos compilados
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Definir metadados da Release
+        id: meta
+        shell: bash
+        run: |
+          SHORT_SHA=$(echo "${{ needs.source.outputs.commit }}" | cut -c1-9)
+          DATE=$(date +'%Y-%m-%d')
+          if [ -n "${{ inputs.tag_name }}" ]; then
+            TAG="${{ inputs.tag_name }}"
+          else
+            TAG="v0.19.1-libretro-promus-${DATE}-${SHORT_SHA}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "title=shadPS4 Libretro · Promus (${DATE} - ${SHORT_SHA})" >> "$GITHUB_OUTPUT"
+
+      - name: Publicar Release no GitHub
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ needs.source.outputs.commit }}
+          name: ${{ steps.meta.outputs.title }}
+          draft: ${{ inputs.draft }}
+          prerelease: true
+          generate_release_notes: true
+          files: |
+            release-assets/*.zip
+            release-assets/*.tar.gz
+            release-assets/*.sha256
+            release-assets/*.txt
+            release-assets/*.json
