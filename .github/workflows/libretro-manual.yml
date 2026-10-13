@@ -1,10 +1,10 @@
-name: Cores Libretro — Windows e Linux (manual)
+name: Libretro Cores — Windows and Linux (Manual)
 
 on:
   workflow_dispatch:
     inputs:
       platform:
-        description: Plataformas para compilar
+        description: Platforms to build
         required: true
         type: choice
         default: both
@@ -13,22 +13,22 @@ on:
           - windows
           - linux
       revision:
-        description: Commit ou tag para compilar (vazio usa a revisão desta execução)
+        description: Commit or tag to build (leave blank to use this run's revision)
         required: false
         type: string
         default: ''
       create_release:
-        description: Criar Release no GitHub automaticamente ao concluir?
+        description: Create a GitHub release automatically when the build finishes?
         required: false
         type: boolean
         default: true
       draft:
-        description: Criar em modo rascunho (Draft)? Se falso, publica direto.
+        description: Create a draft release? If false, publish it immediately.
         required: false
         type: boolean
         default: false
       tag_name:
-        description: Tag da Release (ex. v0.19.1-libretro-promus.3; vazio gera tag automática)
+        description: Release tag (for example v0.19.1-libretro-promus.3; leave blank to generate one)
         required: false
         type: string
         default: ''
@@ -58,27 +58,27 @@ jobs:
         with:
           ref: ${{ needs.source.outputs.commit }}
           submodules: recursive
-      - name: Receita de empacotamento desta execução
+      - name: Check out packaging scripts for this workflow run
         uses: actions/checkout@v6
         with:
           ref: ${{ github.sha }}
           path: _ci
           sparse-checkout: .github/scripts
           persist-credentials: false
-      - name: Ferramentas fixadas
+      - name: Install pinned build tools
         shell: pwsh
         run: |
           python -m pip install cmake==3.31.10 ninja==1.11.1.4
-          if ($LASTEXITCODE -ne 0) { throw 'Falha ao instalar CMake e Ninja.' }
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to install CMake and Ninja.' }
           $toolDir = Join-Path $env:RUNNER_TEMP 'llvm-mingw'
           New-Item -ItemType Directory -Path $toolDir -Force | Out-Null
           Invoke-WebRequest 'https://github.com/mstorsjo/llvm-mingw/releases/download/20260922/llvm-mingw-20260922-ucrt-x86_64.zip' -OutFile "$toolDir/compiler.zip"
           Expand-Archive "$toolDir/compiler.zip" -DestinationPath $toolDir
           "LLVM_ROOT=$toolDir/llvm-mingw-20260922-ucrt-x86_64" >> $env:GITHUB_ENV
-      - name: Compilar DLL Windows
+      - name: Build Windows DLL
         shell: pwsh
         run: ./scripts/build-libretro-windows.ps1 -CompilerBin "$env:LLVM_ROOT/bin" -Jobs 2
-      - name: Empacotar DLL, licenças e metadados
+      - name: Package DLL, licenses, and metadata
         shell: pwsh
         run: |
           python _ci/.github/scripts/package-libretro-windows.py
@@ -103,15 +103,15 @@ jobs:
         with:
           ref: ${{ needs.source.outputs.commit }}
           submodules: recursive
-      - name: Preparar ambiente Linux portátil
+      - name: Prepare portable Linux build environment
         run: |
           sudo apt-get update
           sudo apt-get install -y bubblewrap ripgrep curl binutils
-      - name: Compilar core Linux portátil
+      - name: Build portable Linux core
         env:
           JOBS: '2'
         run: bash scripts/build-libretro-portable.sh
-      - name: Registrar revisão e hash
+      - name: Record source revision and checksum
         run: |
           cat build-libretro-portable/build/dist/release-metadata.json >> "$GITHUB_STEP_SUMMARY"
           cat build-libretro-portable/shadps4-libretro-linux-x86_64.tar.gz.sha256 >> "$GITHUB_STEP_SUMMARY"
@@ -130,13 +130,13 @@ jobs:
     needs: [source, windows, linux]
     runs-on: ubuntu-22.04
     steps:
-      - name: Baixar artefatos compilados
+      - name: Download built artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-assets
           merge-multiple: true
 
-      - name: Definir metadados da Release
+      - name: Set release metadata
         id: meta
         shell: bash
         run: |
@@ -150,7 +150,7 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "title=shadPS4 Libretro · Promus (${DATE} - ${SHORT_SHA})" >> "$GITHUB_OUTPUT"
 
-      - name: Publicar Release no GitHub
+      - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
