@@ -3,14 +3,13 @@ SPDX-FileCopyrightText: 2026 shadPS4 Emulator Project
 SPDX-License-Identifier: GPL-2.0-or-later
 -->
 
-## shadPS4 Libretro para Promus Play
+## shadPS4 Libretro for Promus Play
 
-Core libretro experimental para Promus Play, baseado no código oficial do shadPS4.
+An experimental Libretro core for Promus Play, based on the official shadPS4 source. Emulation is developed by the shadPS4 project; this repository contains the Libretro integration and Promus Play adaptations.
 
-Emulação desenvolvida pelo projeto shadPS4. Integração libretro e adaptações para o Promus Play.
-Windows x86_64 downloads are available in [Releases](https://github.com/LeandroGowes/shadPS4-libretro/releases).
-Read [LIBRETRO.md](LIBRETRO.md) for build instructions, upstream revision, and limitations.
-The Windows core embeds its compiler runtimes. Linux builds have not been validated.
+Downloads for Windows x86_64 and portable Linux x86_64 are available in [Releases](https://github.com/LeandroGowes/shadPS4-libretro/releases). See [LIBRETRO.md](LIBRETRO.md) for build instructions, the upstream revision, supported options, and known limitations. The Windows DLL embeds its compiler runtimes. The portable Linux core has been built and smoke-tested; see the validation notes in the guide.
+
+This is an unofficial community integration. It is not affiliated with or endorsed by the shadPS4 project, Sony Interactive Entertainment, or PlayStation.
 
 <h1 align="center">
   <br>
