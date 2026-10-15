@@ -22,11 +22,13 @@
 #endif
 
 #include <common/key_manager.h>
+#include <common/memory_patcher.h>
 #include <common/path_util.h>
 #include <common/singleton.h>
 #include <core/emulator_state.h>
 #include <core/ipc/ipc.h>
 #include <core/libraries/kernel/time.h>
+#include <core/libraries/np/np_trophy.h>
 #include <input/controller.h>
 #include "common/logging/log.h"
 #include "common/scm_rev.h"
@@ -62,21 +64,28 @@ std::atomic_bool frontend_active{true};
 constexpr std::size_t kMaxQueuedAudioFrames = 48000 * 2;
 
 static const retro_variable core_options[] = {
-    {"shadps4_neo_mode", "Console: modo PS4 Pro (reiniciar jogo); native|disabled|enabled"},
-    {"shadps4_devkit_mode", "Console: modo de desenvolvimento (reiniciar jogo); native|disabled|enabled"},
-    {"shadps4_console_language", "Console: idioma (ID PS4) (reiniciar jogo); native|1|17|0|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|18|19|20|21|22|23|24|25|26|27|28|29"},
-    {"shadps4_circle_enter", "Controle: confirmar com Circle (reiniciar jogo); native|disabled|enabled"},
-    {"shadps4_readbacks", "GPU: leitura de memoria (reiniciar jogo); native|disabled|relaxed|precise"},
-    {"shadps4_readback_linear", "GPU: leitura de imagens lineares (reiniciar jogo); native|disabled|enabled"},
-    {"shadps4_direct_memory", "GPU: acesso direto a memoria (reiniciar jogo); native|disabled|enabled"},
-    {"shadps4_copy_gpu_buffers", "GPU: copiar buffers (reiniciar jogo); native|disabled|enabled"},
-    {"shadps4_gpu", "Vulkan: dispositivo (indice) (reiniciar jogo); native|auto|0|1|2|3"},
-    {"shadps4_pipeline_cache", "Vulkan: cache de pipelines (reiniciar jogo); native|disabled|enabled"},
-    {"shadps4_validation", "Diagnostico: validacao Vulkan (reiniciar jogo); native|disabled|enabled"},
-    {"shadps4_validation_sync", "Diagnostico: validacao de sincronizacao Vulkan (reiniciar jogo); native|disabled|enabled"},
-    {"shadps4_dump_shaders", "Diagnostico: salvar shaders no disco (reiniciar jogo); native|disabled|enabled"},
-    {"shadps4_shader_collect", "Diagnostico: coletar shaders (reiniciar jogo); native|disabled|enabled"},
-    {"shadps4_debug_dump", "Diagnostico: salvar executaveis no disco (reiniciar jogo); native|disabled|enabled"},
+    {"shadps4_neo_mode", "Console: PS4 Pro mode (restart game); native|disabled|enabled"},
+    {"shadps4_devkit_mode", "Console: developer mode (restart game); native|disabled|enabled"},
+    {"shadps4_console_language", "Console: language (PS4 ID) (restart game); native|1|17|0|2|3|4|5|6|7|8|9|10|11|12|13|14|15|16|18|19|20|21|22|23|24|25|26|27|28|29"},
+    {"shadps4_circle_enter", "Controls: confirm with Circle (restart game); native|disabled|enabled"},
+    {"shadps4_readbacks", "GPU: memory readbacks (restart game); native|disabled|relaxed|precise"},
+    {"shadps4_readback_linear", "GPU: linear image readbacks (restart game); native|disabled|enabled"},
+    {"shadps4_direct_memory", "GPU: direct memory access (restart game); native|disabled|enabled"},
+    {"shadps4_copy_gpu_buffers", "GPU: copy buffers (restart game); native|disabled|enabled"},
+    {"shadps4_gpu", "Vulkan: device (index) (restart game); native|auto|0|1|2|3"},
+    {"shadps4_pipeline_cache", "Vulkan: pipeline cache (restart game); native|disabled|enabled"},
+    {"shadps4_validation", "Diagnostics: Vulkan validation (restart game); native|disabled|enabled"},
+    {"shadps4_validation_sync", "Diagnostics: Vulkan synchronization validation (restart game); native|disabled|enabled"},
+    {"shadps4_dump_shaders", "Diagnostics: dump shaders to disk (restart game); native|disabled|enabled"},
+    {"shadps4_shader_collect", "Diagnostics: collect shaders (restart game); native|disabled|enabled"},
+    {"shadps4_debug_dump", "Diagnostics: dump executables to disk (restart game); native|disabled|enabled"},
+    {"shadps4_auto_patches", "Patches: automatically load installed game patches (restart game); native|enabled|disabled"},
+#ifdef _WIN32
+    {"shadps4_redzone_patching", "CPU: Windows guest red-zone patching (restart game); native|disabled|enabled"},
+#endif
+#ifdef __linux__
+    {"shadps4_userfaultfd", "Memory: userfaultfd tracking (restart game); native|disabled|enabled"},
+#endif
     {nullptr, nullptr},
 };
 
@@ -296,6 +305,28 @@ void ApplyCoreOptions() {
             LOG_INFO(Config, "Libretro option shadps4_debug_dump: {}", value);
         }
     }
+    if (const auto value = GetCoreOption("shadps4_auto_patches"); value != "native") {
+        if (value == "enabled" || value == "disabled") {
+            EmulatorState::GetInstance()->SetAutoPatchesLoadEnabled(value == "enabled");
+            LOG_INFO(Config, "Libretro option shadps4_auto_patches: {}", value);
+        }
+    }
+#ifdef _WIN32
+    if (const auto value = GetCoreOption("shadps4_redzone_patching"); value != "native") {
+        if (value == "enabled" || value == "disabled") {
+            EmulatorSettings.SetRedZonePatchingEnabled(value == "enabled", true);
+            LOG_INFO(Config, "Libretro option shadps4_redzone_patching: {}", value);
+        }
+    }
+#endif
+#ifdef __linux__
+    if (const auto value = GetCoreOption("shadps4_userfaultfd"); value != "native") {
+        if (value == "enabled" || value == "disabled") {
+            EmulatorSettings.SetUserfaultfdTracking(value == "enabled", true);
+            LOG_INFO(Config, "Libretro option shadps4_userfaultfd: {}", value);
+        }
+    }
+#endif
 }
 
 
@@ -571,7 +602,29 @@ RETRO_API bool RETRO_CALLCONV retro_unserialize(const void*, size_t) {
     return false;
 }
 RETRO_API void RETRO_CALLCONV retro_cheat_reset(void) {}
-RETRO_API void RETRO_CALLCONV retro_cheat_set(unsigned, bool, const char*) {}
+RETRO_API void RETRO_CALLCONV retro_cheat_set(unsigned, bool enabled, const char* code) {
+    if (!code || !*code) {
+        return;
+    }
+    const std::string_view cheat_code{code};
+    const auto separator = cheat_code.rfind('|');
+    if (separator == std::string_view::npos || separator == 0 || separator + 1 >= cheat_code.size()) {
+        return;
+    }
+    try {
+        const auto index = std::stoull(std::string{cheat_code.substr(separator + 1)});
+        MemoryPatcher::ApplyCheatMod(std::string{cheat_code.substr(0, separator)}, index, enabled);
+    } catch (const std::exception&) {
+        if (log_callback) {
+            log_callback(RETRO_LOG_WARN, "shadPS4: ignored malformed cheat command");
+        }
+    }
+}
+extern "C" RETRO_API const char* RETRO_CALLCONV promus_libretro_get_trophies_json(void) {
+    static std::string trophies_json;
+    trophies_json = Libraries::Np::NpTrophy::GetTrophiesJson();
+    return trophies_json.c_str();
+}
 RETRO_API unsigned RETRO_CALLCONV retro_get_region(void) {
     return RETRO_REGION_NTSC;
 }

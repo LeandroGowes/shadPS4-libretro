@@ -2,9 +2,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <thread>
 #include <unordered_map>
 #include <fmt/format.h>
+#include <nlohmann/json.hpp>
 #include <pugixml.hpp>
 #include "common/elf_info.h"
 #include "common/logging/log.h"
@@ -18,6 +22,7 @@
 #include "core/libraries/np/trophy_ui.h"
 #include "core/libraries/system/userservice.h"
 #include "core/memory.h"
+#include "core/user_settings.h"
 
 namespace Libraries::Np::NpTrophy {
 
@@ -74,6 +79,97 @@ static std::filesystem::path GetTrophyXmlPath(const std::filesystem::path& xml_d
     }
     // Final fallback: master TROP.XML (always present).
     return xml_dir / "TROP.XML";
+}
+
+static std::string EncodeBase64(const std::vector<unsigned char>& bytes) {
+    static constexpr std::string_view alphabet =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string encoded;
+    encoded.reserve(((bytes.size() + 2) / 3) * 4);
+    for (size_t i = 0; i < bytes.size(); i += 3) {
+        const auto first = bytes[i];
+        const auto second = i + 1 < bytes.size() ? bytes[i + 1] : 0;
+        const auto third = i + 2 < bytes.size() ? bytes[i + 2] : 0;
+        encoded.push_back(alphabet[first >> 2]);
+        encoded.push_back(alphabet[((first & 0x03) << 4) | (second >> 4)]);
+        encoded.push_back(i + 1 < bytes.size() ? alphabet[((second & 0x0f) << 2) | (third >> 6)] : '=');
+        encoded.push_back(i + 2 < bytes.size() ? alphabet[third & 0x3f] : '=');
+    }
+    return encoded;
+}
+
+std::string GetTrophiesJson() {
+    using nlohmann::json;
+    json result{{"titleId", std::string{Common::ElfInfo::Instance().GameSerial()}},
+                {"userId", 0},
+                {"total", 0},
+                {"unlocked", 0},
+                {"trophies", json::array()}};
+
+    const auto& trophy_map = Common::ElfInfo::Instance().GetTrophyIndexMap();
+    if (trophy_map.empty()) {
+        return result.dump();
+    }
+
+    const auto user = UserSettings.GetUserManager().GetDefaultUser();
+    result["userId"] = user.user_id;
+    const auto trophy_root = Common::FS::GetUserPath(Common::FS::PathType::TrophyDir);
+    const auto user_trophy_root = EmulatorSettings.GetHomeDir() / std::to_string(user.user_id) / "trophy";
+    const auto language = EmulatorSettings.GetConsoleLanguage();
+
+    for (const auto& entry : trophy_map) {
+        const auto& np_comm_id = entry.second;
+        const auto package_root = trophy_root / np_comm_id;
+        const auto xml_path = GetTrophyXmlPath(package_root / "Xml", language);
+        pugi::xml_document package_doc;
+        if (!package_doc.load_file(xml_path.native().c_str())) {
+            continue;
+        }
+
+        pugi::xml_document progress_doc;
+        const auto progress_path = user_trophy_root / (np_comm_id + ".xml");
+        const bool has_progress = progress_doc.load_file(progress_path.native().c_str());
+        const auto package_conf = package_doc.child("trophyconf");
+        const auto progress_conf = has_progress ? progress_doc.child("trophyconf") : pugi::xml_node{};
+        for (const auto& trophy : package_conf.children("trophy")) {
+            const auto id = trophy.attribute("id").as_int(-1);
+            if (id < 0) {
+                continue;
+            }
+            auto progress_trophy = progress_conf;
+            if (has_progress) {
+                progress_trophy = progress_conf.find_child_by_attribute("trophy", "id", trophy.attribute("id").value());
+            }
+            const bool unlocked = progress_trophy && progress_trophy.attribute("unlockstate").as_bool();
+            const std::string grade = trophy.attribute("ttype").as_string();
+            const int grade_value = grade == "P" ? 1 : grade == "G" ? 2 : grade == "S" ? 3 : 4;
+            json item{{"id", id},
+                      {"npCommId", np_comm_id},
+                      {"name", trophy.child("name").text().as_string()},
+                      {"description", trophy.child("detail").text().as_string()},
+                      {"grade", grade_value},
+                      {"hidden", trophy.attribute("hidden").as_bool()},
+                      {"unlocked", unlocked},
+                      {"timestamp", progress_trophy ? progress_trophy.attribute("timestamp").as_ullong() : 0},
+                      {"icon", ""}};
+
+            const auto icon_path = package_root / "Icons" / fmt::format("TROP{:03d}.PNG", id);
+            std::error_code error;
+            const auto icon_size = std::filesystem::file_size(icon_path, error);
+            if (!error && icon_size > 0 && icon_size <= 512 * 1024) {
+                std::ifstream icon_file(icon_path, std::ios::binary);
+                if (icon_file) {
+                    const std::vector<unsigned char> icon_bytes((std::istreambuf_iterator<char>(icon_file)),
+                                                                std::istreambuf_iterator<char>());
+                    item["icon"] = EncodeBase64(icon_bytes);
+                }
+            }
+            result["unlocked"] = result["unlocked"].get<int>() + (unlocked ? 1 : 0);
+            result["trophies"].push_back(std::move(item));
+        }
+    }
+    result["total"] = result["trophies"].size();
+    return result.dump();
 }
 
 static void ApplyUnlockToXmlFile(const std::filesystem::path& xml_path, OrbisNpTrophyId trophyId,
