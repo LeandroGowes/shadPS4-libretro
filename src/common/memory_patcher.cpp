@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <codecvt>
 #include <fstream>
+#include <cctype>
 #include <sstream>
 #include <string>
 #include <nlohmann/json.hpp>
@@ -273,6 +274,146 @@ void OnGameLoaded() {
         }
     }
     ApplyPendingPatches();
+    ApplySelectedCheats();
+}
+
+bool ApplyCheatMod(const std::string& fileName, size_t modIndex, bool enabled) {
+    if (g_eboot_address == 0 || g_eboot_image_size == 0 ||
+        std::filesystem::path{fileName}.filename() != fileName ||
+        fileName.find("..") != std::string::npos) {
+        return false;
+    }
+    const auto cheats_dir = Common::FS::GetUserPath(Common::FS::PathType::CheatsDir);
+    std::ifstream cheat_file{cheats_dir / fileName};
+    if (!cheat_file.is_open()) {
+        return false;
+    }
+
+    nlohmann::json cheat;
+    try {
+        cheat = nlohmann::json::parse(cheat_file);
+    } catch (const nlohmann::json::exception& error) {
+        LOG_ERROR(Loader, "Could not parse cheat file {}: {}", fileName, error.what());
+        return false;
+    }
+    const auto app_version = Common::Singleton<PSF>::Instance()->GetString("APP_VER")
+                                 .value_or("Unknown version");
+    if (cheat.value("id", std::string{}) != g_game_serial ||
+        cheat.value("version", std::string{}) != app_version) {
+        return false;
+    }
+    const auto mods = cheat.value("mods", nlohmann::json::array());
+    if (!mods.is_array() || modIndex >= mods.size()) {
+        return false;
+    }
+    const auto& mod = mods[modIndex];
+    if (!mod.is_object() || !mod.contains("memory") || !mod["memory"].is_array()) {
+        return false;
+    }
+    const auto mod_name = mod.value("name", std::string{"Unnamed cheat"});
+    const bool has_hint = mod.contains("hint") && !mod["hint"].is_null();
+    bool applied = false;
+    for (const auto& memory : mod["memory"]) {
+        const auto value_key = enabled ? "on" : "off";
+        if (!memory.is_object() || !memory.contains("offset") || !memory.contains(value_key) ||
+            !memory["offset"].is_string() || !memory[value_key].is_string()) {
+            continue;
+        }
+        auto offset = memory["offset"].get<std::string>();
+        auto value = memory[value_key].get<std::string>();
+        value.erase(std::remove_if(value.begin(), value.end(), [](unsigned char character) {
+                        return std::isspace(character) != 0;
+                    }),
+                    value.end());
+        if (offset.empty() || value.empty() || value.size() % 2 != 0 ||
+            !std::all_of(value.begin(), value.end(), [](unsigned char character) {
+                return std::isxdigit(character) != 0;
+            })) {
+            LOG_WARNING(Loader, "Ignoring invalid memory value in cheat '{}'", mod_name);
+            continue;
+        }
+        try {
+            const auto address_offset = std::stoull(offset, nullptr, 16);
+            const auto byte_count = value.size() / 2;
+            if (!has_hint && address_offset < 0x400000) {
+                LOG_WARNING(Loader, "Ignoring invalid absolute address in cheat '{}'", mod_name);
+                continue;
+            }
+            const auto image_offset = has_hint ? address_offset : address_offset - 0x400000;
+            if (image_offset >= g_eboot_image_size || byte_count > g_eboot_image_size - image_offset) {
+                LOG_WARNING(Loader, "Ignoring out-of-range memory write in cheat '{}'", mod_name);
+                continue;
+            }
+            const patchInfo patch{
+                .gameSerial = g_game_serial,
+                .modNameStr = mod_name,
+                .offsetStr = offset,
+                .valueStr = value,
+                .targetStr = {},
+                .sizeStr = {},
+                .isOffset = !has_hint,
+                .littleEndian = false,
+                .patchMask = PatchMask::None,
+                .maskOffset = 0,
+            };
+            PatchMemory(patch);
+            applied = true;
+        } catch (const std::exception&) {
+            LOG_WARNING(Loader, "Ignoring invalid offset in cheat '{}'", mod_name);
+        }
+    }
+    return applied;
+}
+
+void ApplySelectedCheats() {
+    if (g_eboot_address == 0 || g_eboot_image_size == 0) {
+        return;
+    }
+
+    const auto cheats_dir = Common::FS::GetUserPath(Common::FS::PathType::CheatsDir);
+    const auto selection_path = cheats_dir / "selected.json";
+    std::ifstream selection_file{selection_path};
+    if (!selection_file.is_open()) {
+        return;
+    }
+
+    nlohmann::json selection;
+    try {
+        selection = nlohmann::json::parse(selection_file);
+    } catch (const nlohmann::json::exception& error) {
+        LOG_ERROR(Loader, "Could not parse selected cheats {}: {}", selection_path.string(),
+                  error.what());
+        return;
+    }
+
+    const auto serial = selection.value("serial", std::string{});
+    const auto selected_version = selection.value("appVersion", std::string{});
+    const auto files = selection.value("files", nlohmann::json::object());
+    const auto app_version = Common::Singleton<PSF>::Instance()->GetString("APP_VER")
+                                 .value_or("Unknown version");
+    if (selection.value("format", std::string{}) != "promus-shadps4-cheats" ||
+        selection.value("version", 0) != 1 || serial != g_game_serial ||
+        (!selected_version.empty() && selected_version != app_version) || !files.is_object()) {
+        return;
+    }
+
+    for (const auto& [file_name, selected_mods] : files.items()) {
+        if (std::filesystem::path{file_name}.filename() != file_name ||
+            file_name.find("..") != std::string::npos || !selected_mods.is_array()) {
+            continue;
+        }
+
+        for (const auto& index_value : selected_mods) {
+            if (!index_value.is_number_unsigned() && !index_value.is_number_integer()) {
+                continue;
+            }
+            const auto index = index_value.get<std::int64_t>();
+            if (index < 0) {
+                continue;
+            }
+            ApplyCheatMod(file_name, static_cast<std::size_t>(index), true);
+        }
+    }
 }
 
 void AddPatchToQueue(const patchInfo& patchToAdd) {

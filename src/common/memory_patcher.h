@@ -42,6 +42,8 @@ struct patchInfo {
 std::string convertValueToHex(const std::string type, const std::string valueStr);
 
 void OnGameLoaded();
+void ApplySelectedCheats();
+bool ApplyCheatMod(const std::string& fileName, size_t modIndex, bool enabled);
 void AddPatchToQueue(const patchInfo& patchToAdd);
 
 void PatchMemory(const patchInfo& patch);

@@ -476,6 +476,8 @@ void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
 
     LOG_INFO(Config, "Game-specific config used: {}",
              EmulatorState::GetInstance()->IsGameSpecifigConfigUsed());
+    LOG_INFO(Config, "Patches autoLoad: {}",
+             EmulatorState::GetInstance()->IsAutoPatchesLoadEnabled());
 
     LOG_INFO(Config, "General isNeo: {}", EmulatorSettings.IsNeo());
     LOG_INFO(Config, "General isDevKit: {}", EmulatorSettings.IsDevKit());
