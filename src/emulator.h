@@ -5,6 +5,8 @@
 
 #include <filesystem>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <thread>
 
 #include "common/singleton.h"
@@ -62,5 +64,7 @@ private:
     std::jthread play_time_thread;
     bool game_started{};
 };
+
+std::string InspectTrophies(const std::filesystem::path& game_path, std::string_view title_id);
 
 } // namespace Core

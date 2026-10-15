@@ -4,6 +4,8 @@
 #pragma once
 
 #include <string>
+#include <string_view>
+#include <map>
 #include <core/libraries/system/userservice.h>
 #include "common/types.h"
 #include "core/libraries/rtc/rtc.h"
@@ -228,4 +230,5 @@ int PS4_SYSV_ABI Func_FA7A2DD770447552();
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym);
 std::string GetTrophiesJson();
+std::string GetTrophiesJson(std::string_view title_id, const std::map<s32, std::string>& trophy_map);
 } // namespace Libraries::Np::NpTrophy

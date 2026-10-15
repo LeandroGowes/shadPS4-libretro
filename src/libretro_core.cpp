@@ -7,8 +7,10 @@
 #include <array>
 #include <atomic>
 #include <deque>
+#include <cstring>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -624,6 +626,61 @@ extern "C" RETRO_API const char* RETRO_CALLCONV promus_libretro_get_trophies_jso
     static std::string trophies_json;
     trophies_json = Libraries::Np::NpTrophy::GetTrophiesJson();
     return trophies_json.c_str();
+}
+extern "C" RETRO_API bool RETRO_CALLCONV promus_libretro_inspect_trophies(
+    const char* game_path, const char* user_directory, const char* title_id,
+    const char* output_path, char* error, std::size_t error_capacity) {
+    const auto set_error = [error, error_capacity](std::string_view message) {
+        if (!error || error_capacity == 0) return;
+        const auto size = std::min(error_capacity - 1, message.size());
+        std::memcpy(error, message.data(), size);
+        error[size] = '\0';
+    };
+    try {
+        if (!game_path || !*game_path || !user_directory || !*user_directory ||
+            !title_id || !*title_id || !output_path || !*output_path) {
+            set_error("Parâmetros ausentes para consultar troféus.");
+            return false;
+        }
+        SetUserDirectory(std::filesystem::u8path(user_directory));
+        KeyManager::GetInstance()->LoadFromFile();
+        if (KeyManager::GetInstance()->GetAllKeys().TrophyKeySet.ReleaseTrophyKey.size() != 16) {
+            set_error("Configure a chave de troféus do shadPS4 para ler os pacotes deste jogo.");
+            return false;
+        }
+        EmulatorSettings.Load(title_id);
+        UserSettings.Load();
+        const auto json = Core::InspectTrophies(std::filesystem::u8path(game_path), title_id);
+        const auto destination = std::filesystem::u8path(output_path);
+        std::filesystem::create_directories(destination.parent_path());
+        auto temporary = destination;
+        temporary += ".tmp";
+        {
+            std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+            if (!output || !output.write(json.data(), static_cast<std::streamsize>(json.size()))) {
+                set_error("Não foi possível gravar o cache de troféus.");
+                return false;
+            }
+        }
+        std::error_code ec;
+        std::filesystem::rename(temporary, destination, ec);
+        if (ec) {
+            std::filesystem::remove(destination, ec);
+            ec.clear();
+            std::filesystem::rename(temporary, destination, ec);
+        }
+        if (ec) {
+            set_error("Não foi possível finalizar o cache de troféus.");
+            return false;
+        }
+        return true;
+    } catch (const std::exception& exception) {
+        set_error(exception.what());
+        return false;
+    } catch (...) {
+        set_error("Falha desconhecida ao consultar troféus.");
+        return false;
+    }
 }
 RETRO_API unsigned RETRO_CALLCONV retro_get_region(void) {
     return RETRO_REGION_NTSC;

@@ -99,14 +99,19 @@ static std::string EncodeBase64(const std::vector<unsigned char>& bytes) {
 }
 
 std::string GetTrophiesJson() {
+    return GetTrophiesJson(std::string{Common::ElfInfo::Instance().GameSerial()},
+                           Common::ElfInfo::Instance().GetTrophyIndexMap());
+}
+
+std::string GetTrophiesJson(std::string_view title_id,
+                            const std::map<s32, std::string>& trophy_map) {
     using nlohmann::json;
-    json result{{"titleId", std::string{Common::ElfInfo::Instance().GameSerial()}},
+    json result{{"titleId", std::string{title_id}},
                 {"userId", 0},
                 {"total", 0},
                 {"unlocked", 0},
                 {"trophies", json::array()}};
 
-    const auto& trophy_map = Common::ElfInfo::Instance().GetTrophyIndexMap();
     if (trophy_map.empty()) {
         return result.dump();
     }
