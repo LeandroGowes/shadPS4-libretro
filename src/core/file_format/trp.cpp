@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
+#include <cctype>
 #include <system_error>
 
 #include "common/aes.h"
@@ -58,7 +60,11 @@ bool TRP::Extract(const std::filesystem::path& trophyPath, std::string npCommId,
         std::filesystem::remove_all(outputPath, ec);
     };
     try {
-        if (trophyPath.extension() != ".trp") {
+        auto extension = trophyPath.extension().string();
+        std::transform(extension.begin(), extension.end(), extension.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if (extension != ".trp") {
             return false;
         }
         Common::FS::IOFile file(trophyPath, Common::FS::FileAccessMode::Read);

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <cctype>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -276,6 +277,96 @@ std::map<s32, std::string> ExtractTrophies(std::string_view npbind_guest,
     }
 
     return trophy_index_map;
+}
+
+std::string InspectTrophies(const std::filesystem::path& game_path, std::string_view title_id) {
+    namespace fs = std::filesystem;
+    auto game_root = game_path;
+    if (!fs::is_directory(game_root)) {
+        if (game_root.filename() == "eboot.bin") {
+            game_root = game_root.parent_path();
+        } else if (fs::is_directory(game_root.parent_path() / "sce_sys")) {
+            game_root = game_root.parent_path();
+        }
+    }
+
+    NPBindFile npbind;
+    if (!npbind.Load((game_root / "sce_sys" / "npbind.dat").string())) {
+        throw std::runtime_error("Não foi possível ler sce_sys/npbind.dat do jogo.");
+    }
+    const auto np_comm_ids = npbind.GetNpCommIds();
+    if (np_comm_ids.empty()) {
+        throw std::runtime_error("O jogo não informa IDs de troféus em npbind.dat.");
+    }
+
+    std::map<s32, std::string> trophy_index_map;
+    const auto game_trophy_dir = game_root / "sce_sys" / "trophy";
+    const auto trophy_output_root = Common::FS::GetUserPath(Common::FS::PathType::TrophyDir);
+    const auto user = UserSettings.GetUserManager().GetDefaultUser();
+    const auto user_trophy_root = EmulatorSettings.GetHomeDir() / std::to_string(user.user_id) / "trophy";
+
+    if (fs::is_directory(game_trophy_dir)) {
+        for (const auto& entry : fs::directory_iterator(game_trophy_dir)) {
+            if (!entry.is_regular_file()) continue;
+            auto filename = entry.path().filename().string();
+            std::transform(filename.begin(), filename.end(), filename.begin(), [](unsigned char c) {
+                return static_cast<char>(std::tolower(c));
+            });
+            if (!filename.starts_with("trophy") || !filename.ends_with(".trp")) continue;
+
+            const auto index_text = filename.substr(6, filename.size() - 10);
+            s32 index = -1;
+            try {
+                size_t parsed = 0;
+                index = std::stoi(index_text, &parsed);
+                if (parsed != index_text.size()) continue;
+            } catch (...) {
+                continue;
+            }
+            if (index < 0 || static_cast<size_t>(index) >= np_comm_ids.size()) continue;
+
+            const auto& np_comm_id = np_comm_ids[static_cast<size_t>(index)];
+            const auto package_root = trophy_output_root / np_comm_id;
+            const auto xml_dir = package_root / "Xml";
+            bool has_trophy_xml = false;
+            if (fs::is_directory(xml_dir)) {
+                for (const auto& xml : fs::directory_iterator(xml_dir)) {
+                    auto name = xml.path().filename().string();
+                    std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) {
+                        return static_cast<char>(std::toupper(c));
+                    });
+                    if (xml.is_regular_file() && name.starts_with("TROP") && name.ends_with(".XML")) {
+                        has_trophy_xml = true;
+                        break;
+                    }
+                }
+            }
+            if (!has_trophy_xml) {
+                TRP trp;
+                if (!trp.Extract(entry.path(), np_comm_id, package_root)) continue;
+            }
+            if (!fs::is_directory(xml_dir)) continue;
+
+            trophy_index_map[index] = np_comm_id;
+            const auto user_trophy_file = user_trophy_root / (np_comm_id + ".xml");
+            if (!fs::exists(user_trophy_file)) {
+                fs::create_directories(user_trophy_file.parent_path());
+                std::error_code error;
+                for (const auto& xml : fs::directory_iterator(xml_dir)) {
+                    auto name = xml.path().filename().string();
+                    std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) {
+                        return static_cast<char>(std::toupper(c));
+                    });
+                    if (xml.is_regular_file() && name == "TROPCONF.XML") {
+                        fs::copy_file(xml.path(), user_trophy_file, error);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    return Libraries::Np::NpTrophy::GetTrophiesJson(title_id, trophy_index_map);
 }
 
 void Emulator::Run(std::filesystem::path file, std::vector<std::string> args,
