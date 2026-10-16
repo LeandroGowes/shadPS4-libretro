@@ -122,9 +122,30 @@ void GameController::SetFrontendState(const State& state) {
     std::lock_guard lock{m_state_mutex};
     const bool connected = m_state.connected;
     const u8 connected_count = m_state.connected_count;
-    m_state = state;
+    const bool was_pressed = m_state.touchpad[0].state || m_state.touchpad[1].state;
+    auto next = state;
+    for (int i = 0; i < 2; ++i) {
+        if (!next.touchpad[i].state)
+            continue;
+        if (m_state.touchpad[i].state) {
+            next.touchpad[i].ID = m_state.touchpad[i].ID;
+        } else {
+            next.touchpad[i].ID = m_next_touch_id;
+            m_next_touch_id = m_next_touch_id == 127 ? 1 : m_next_touch_id + 1;
+        }
+    }
+    const bool is_pressed = next.touchpad[0].state || next.touchpad[1].state;
+    if (!was_pressed && is_pressed) {
+        m_touch_down_timestamp = state.time;
+    } else if (!is_pressed) {
+        m_touch_down_timestamp = 0;
+    }
+    m_state = next;
     m_state.connected = connected;
     m_state.connected_count = connected_count;
+    // Libretro supplies an absolute sensor orientation with each frontend
+    // state, so don't integrate the same gyro sample over it a second time.
+    m_last_orientation_update = state.time;
     PushStateLocked(state.time);
 }
 #endif

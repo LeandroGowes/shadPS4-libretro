@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <atomic>
 #include <bit>
+#include <chrono>
 #include <cstdint>
 #include <SDL3/SDL_events.h>
 #include <imgui.h>
@@ -37,6 +38,11 @@ static std::mutex change_layers_mutex{};
 
 static ImGuiID dock_id;
 static std::atomic<std::uint32_t> force_gamepad_input_capture_count{0};
+#if defined(LIBRETRO_CORE)
+static std::atomic<u64> frontend_input{};
+static std::atomic_bool frontend_input_captured{};
+static auto frontend_frame_time = std::chrono::steady_clock::now();
+#endif
 
 namespace ImGui {
 
@@ -58,8 +64,22 @@ void ReleaseGamepadInputCapture() {
 }
 
 bool IsGamepadInputCaptured() {
+#if defined(LIBRETRO_CORE)
+    if (frontend_input_captured.load(std::memory_order_relaxed)) {
+        return true;
+    }
+#endif
     return force_gamepad_input_capture_count.load(std::memory_order_relaxed) > 0;
 }
+
+#if defined(LIBRETRO_CORE)
+void SubmitFrontendInput(u32 buttons, s16 left_x, s16 left_y) {
+    frontend_input.store(static_cast<u64>(buttons) |
+                             (static_cast<u64>(static_cast<u16>(left_x)) << 32) |
+                             (static_cast<u64>(static_cast<u16>(left_y)) << 48),
+                         std::memory_order_relaxed);
+}
+#endif
 
 void Initialize(const ::Vulkan::Instance& instance, const Frontend::WindowSDL& window,
                 const u32 image_count, vk::Format surface_format,
@@ -116,7 +136,9 @@ void Initialize(const ::Vulkan::Instance& instance, const Frontend::WindowSDL& w
     StyleColorsDark();
 
     ::Core::Devtools::Layer::SetupSettings();
-    Sdl::Init(window.GetSDLWindow());
+    if (window.GetSDLWindow()) {
+        Sdl::Init(window.GetSDLWindow());
+    }
 
     const Vulkan::InitInfo vk_info{
         .instance = instance.GetInstance(),
@@ -141,8 +163,10 @@ void Initialize(const ::Vulkan::Instance& instance, const Frontend::WindowSDL& w
     ImFormatString(label, IM_ARRAYSIZE(label), "WindowOverViewport_%08X", GetMainViewport()->ID);
     dock_id = ImHashStr(label);
 
-    if (const auto dpi = SDL_GetWindowDisplayScale(window.GetSDLWindow()); dpi > 0.0f) {
-        GetIO().FontGlobalScale *= dpi;
+    if (window.GetSDLWindow()) {
+        if (const auto dpi = SDL_GetWindowDisplayScale(window.GetSDLWindow()); dpi > 0.0f) {
+            GetIO().FontGlobalScale *= dpi;
+        }
     }
 
     std::at_quick_exit([] { SaveIniSettingsToDisk(GetIO().IniFilename); });
@@ -170,7 +194,11 @@ void Shutdown(const vk::Device& device) {
     const auto log_filename = (void*)io.LogFilename;
 
     Vulkan::Shutdown();
+#if !defined(LIBRETRO_CORE)
     Sdl::Shutdown();
+#else
+    frontend_input_captured.store(false, std::memory_order_relaxed);
+#endif
     DestroyContext();
 
     delete[] (char*)ini_filename;
@@ -235,7 +263,40 @@ ImGuiID NewFrame(bool is_reusing_frame) {
         }
     }
 
+#if defined(LIBRETRO_CORE)
+    auto& io = GetIO();
+    const auto now = std::chrono::steady_clock::now();
+    io.DeltaTime =
+        std::clamp(std::chrono::duration<float>(now - frontend_frame_time).count(), 0.001f, 0.1f);
+    frontend_frame_time = now;
+    io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
+    const u64 input = frontend_input.load(std::memory_order_relaxed);
+    const std::pair<ImGuiKey, u32> buttons[] = {
+        {ImGuiKey_GamepadFaceDown, 0},  {ImGuiKey_GamepadFaceLeft, 1},
+        {ImGuiKey_GamepadBack, 2},      {ImGuiKey_GamepadStart, 3},
+        {ImGuiKey_GamepadDpadUp, 4},    {ImGuiKey_GamepadDpadDown, 5},
+        {ImGuiKey_GamepadDpadLeft, 6},  {ImGuiKey_GamepadDpadRight, 7},
+        {ImGuiKey_GamepadFaceRight, 8}, {ImGuiKey_GamepadFaceUp, 9},
+        {ImGuiKey_GamepadL1, 10},       {ImGuiKey_GamepadR1, 11},
+        {ImGuiKey_GamepadL2, 12},       {ImGuiKey_GamepadR2, 13},
+        {ImGuiKey_GamepadL3, 14},       {ImGuiKey_GamepadR3, 15},
+    };
+    for (const auto& [key, bit] : buttons) {
+        io.AddKeyEvent(key, (input & (u64{1} << bit)) != 0);
+    }
+    const float x = static_cast<s16>(input >> 32) / 32768.0f;
+    const float y = static_cast<s16>(input >> 48) / 32768.0f;
+    const auto axis = [&io](ImGuiKey key, float value) {
+        const float amount = std::clamp((value - 0.24f) / 0.76f, 0.0f, 1.0f);
+        io.AddKeyAnalogEvent(key, amount > 0, amount);
+    };
+    axis(ImGuiKey_GamepadLStickLeft, -x);
+    axis(ImGuiKey_GamepadLStickRight, x);
+    axis(ImGuiKey_GamepadLStickUp, -y);
+    axis(ImGuiKey_GamepadLStickDown, y);
+#else
     Sdl::NewFrame(is_reusing_frame);
+#endif
     ImGui::NewFrame();
     SetKeyOwner(ImGuiKey_GamepadFaceUp, ImHashStr("shadps4/pad"));
 
@@ -250,11 +311,20 @@ ImGuiID NewFrame(bool is_reusing_frame) {
         layer->Draw();
     }
 
+#if defined(LIBRETRO_CORE)
+    const auto* navigation_window = io.Ctx->NavWindow;
+    frontend_input_captured.store(
+        !layers.empty() && navigation_window && navigation_window->ID != dock_id &&
+            (navigation_window->Flags & ImGuiWindowFlags_NoNav) == 0 &&
+            (io.NavActive || io.WantCaptureKeyboard),
+        std::memory_order_relaxed);
+#endif
+
     return dockId;
 }
 
 void Render(const vk::CommandBuffer& cmdbuf, const vk::ImageView& image_view,
-            const vk::Extent2D& extent) {
+            const vk::Extent2D& extent, bool preserve_contents) {
     ImGui::Render();
     ImDrawData* draw_data = GetDrawData();
     // Font atlas uploads are recorded ahead of the render pass that samples them.
@@ -273,7 +343,8 @@ void Render(const vk::CommandBuffer& cmdbuf, const vk::ImageView& image_view,
         {
             .imageView = image_view,
             .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-            .loadOp = vk::AttachmentLoadOp::eClear,
+            .loadOp =
+                preserve_contents ? vk::AttachmentLoadOp::eLoad : vk::AttachmentLoadOp::eClear,
             .storeOp = vk::AttachmentStoreOp::eStore,
         },
     };

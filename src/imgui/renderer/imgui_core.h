@@ -35,7 +35,11 @@ bool IsGamepadInputCaptured();
 ImGuiID NewFrame(bool is_reusing_frame = false);
 
 void Render(const vk::CommandBuffer& cmdbuf, const vk::ImageView& image_view,
-            const vk::Extent2D& extent);
+            const vk::Extent2D& extent, bool preserve_contents = false);
+
+#if defined(LIBRETRO_CORE)
+void SubmitFrontendInput(u32 buttons, s16 left_x, s16 left_y);
+#endif
 
 bool MustKeepDrawing(); // Force the emulator redraw
 

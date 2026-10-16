@@ -85,6 +85,10 @@ Error PS4_SYSV_ABI sceSaveDataDialogOpen(const OrbisSaveDataDialogParam* param) 
     g_state = SaveDialogState{*param};
     g_status = Status::RUNNING;
     g_save_dialog_ui = SaveDialogUi(&g_state, &g_status, &g_result);
+#if defined(LIBRETRO_CORE)
+    LOG_INFO(Lib_SaveDataDialog, "Libretro system dialog opened: mode={}, type={}",
+             magic_enum::enum_name(param->mode), magic_enum::enum_name(param->dispType));
+#endif
     return Error::OK;
 }
 
