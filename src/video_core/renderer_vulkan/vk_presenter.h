@@ -39,6 +39,9 @@ struct Frame {
 
     ImTextureID imgui_texture;
 #if defined(LIBRETRO_CORE)
+    vk::Image ui_image{};
+    vk::ImageView ui_image_view{};
+    VmaAllocation ui_allocation{};
     vk::Buffer readback_buffer;
     VmaAllocation readback_allocation{};
 #endif

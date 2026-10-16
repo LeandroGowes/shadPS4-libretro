@@ -507,6 +507,8 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
     ImGui::Friends::Register();
     ImGui::ShadNetNotify::Register();
     ImGui::InvitationPrompt::Register();
+#else
+    ImGui::Core::Initialize(instance, window, num_images, vk::Format::eR8G8B8A8Unorm);
 #endif
 }
 
@@ -521,6 +523,9 @@ Presenter::~Presenter() {
     draw_scheduler.Finish();
     present_scheduler.Finish();
     flip_scheduler.Finish();
+#if defined(LIBRETRO_CORE)
+    ImGui::Core::Shutdown(instance.GetDevice());
+#endif
     Check(draw_scheduler.CommandBuffer().reset());
     Check(present_scheduler.CommandBuffer().reset());
     Check(flip_scheduler.CommandBuffer().reset());
@@ -531,6 +536,10 @@ Presenter::~Presenter() {
         device.destroyImageView(frame.image_view);
         device.destroyFence(frame.present_done);
 #if defined(LIBRETRO_CORE)
+        if (frame.ui_image_view) {
+            device.destroyImageView(frame.ui_image_view);
+            vmaDestroyImage(instance.GetAllocator(), frame.ui_image, frame.ui_allocation);
+        }
         if (frame.readback_buffer) {
             vmaDestroyBuffer(instance.GetAllocator(), frame.readback_buffer,
                              frame.readback_allocation);
@@ -613,6 +622,22 @@ void Presenter::RecreateFrame(Frame* frame, u32 width, u32 height) {
     frame->is_hdr = swapchain->GetHDR();
 #else
     frame->is_hdr = false;
+
+    if (frame->ui_image_view) {
+        device.destroyImageView(frame->ui_image_view);
+        vmaDestroyImage(instance.GetAllocator(), frame->ui_image, frame->ui_allocation);
+    }
+    VkImage ui_image{};
+    const VkResult ui_result =
+        vmaCreateImage(instance.GetAllocator(), &unsafe_image_info, &alloc_info, &ui_image,
+                       &frame->ui_allocation, nullptr);
+    ASSERT_MSG(ui_result == VK_SUCCESS, "Failed allocating Libretro dialog target: {}",
+               static_cast<int>(ui_result));
+    frame->ui_image = vk::Image{ui_image};
+    auto ui_view_info = view_info;
+    ui_view_info.image = frame->ui_image;
+    frame->ui_image_view =
+        Check<"create Libretro dialog view">(device.createImageView(ui_view_info));
 
     if (frame->readback_buffer) {
         vmaDestroyBuffer(instance.GetAllocator(), frame->readback_buffer,
@@ -803,6 +828,18 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     // the post process pass still sRGB encoded and has to be decoded there instead.
     pp_settings.srgb_input =
         attribute.attrib.pixel_format == Libraries::VideoOut::PixelFormat::A2R10G10B10Srgb;
+#if defined(LIBRETRO_CORE)
+    static std::optional<Libraries::VideoOut::PixelFormat> logged_format;
+    if (logged_format != attribute.attrib.pixel_format) {
+        logged_format = attribute.attrib.pixel_format;
+        LOG_INFO(Render_Vulkan,
+                 "Libretro output: VideoOut={}, sampled={}, output=RGBA8_UNORM, gamma={}, "
+                 "hdr={}, srgb_input={}, fsr={}, rcas={}",
+                 Libraries::VideoOut::GetPixelFormatString(attribute.attrib.pixel_format),
+                 vk::to_string(view_info.format), pp_settings.gamma, pp_settings.hdr,
+                 pp_settings.srgb_input, fsr_settings.enable, fsr_settings.use_rcas);
+    }
+#endif
     pp_pass.Render(cmdbuf, image_view, image_size, *frame, pp_settings);
 
     DebugState.game_resolution = {image_size.width, image_size.height};
@@ -909,6 +946,9 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
 
 #if defined(LIBRETRO_CORE)
     const vk::Device device = instance.GetDevice();
+    ImGui::GetIO().DisplaySize =
+        ImVec2(static_cast<float>(frame->width), static_cast<float>(frame->height));
+    ImGui::Core::NewFrame(is_reusing_frame);
     const auto reset_result = device.resetFences(frame->present_done);
     ASSERT_MSG(reset_result == vk::Result::eSuccess,
                "Unexpected error resetting Libretro frame fence: {}", vk::to_string(reset_result));
@@ -939,6 +979,63 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         .imageMemoryBarrierCount = 1,
         .pImageMemoryBarriers = &to_transfer,
     });
+    const vk::ImageMemoryBarrier2 ui_to_transfer{
+        .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+        .srcAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
+        .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+        .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+        .oldLayout = vk::ImageLayout::eUndefined,
+        .newLayout = vk::ImageLayout::eTransferDstOptimal,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = frame->ui_image,
+        .subresourceRange = subresource,
+    };
+    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &ui_to_transfer,
+    });
+    const vk::ImageCopy ui_copy{
+        .srcSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+        .dstSubresource = {vk::ImageAspectFlagBits::eColor, 0, 0, 1},
+        .extent = {frame->width, frame->height, 1},
+    };
+    cmdbuf.copyImage(frame->image, vk::ImageLayout::eTransferSrcOptimal, frame->ui_image,
+                     vk::ImageLayout::eTransferDstOptimal, ui_copy);
+    const vk::ImageMemoryBarrier2 ui_to_render{
+        .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+        .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+        .dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+        .dstAccessMask =
+            vk::AccessFlagBits2::eColorAttachmentRead | vk::AccessFlagBits2::eColorAttachmentWrite,
+        .oldLayout = vk::ImageLayout::eTransferDstOptimal,
+        .newLayout = vk::ImageLayout::eColorAttachmentOptimal,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = frame->ui_image,
+        .subresourceRange = subresource,
+    };
+    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &ui_to_render,
+    });
+    ImGui::Core::Render(cmdbuf, frame->ui_image_view, {frame->width, frame->height}, true);
+    const vk::ImageMemoryBarrier2 ui_to_readback{
+        .srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
+        .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
+        .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+        .dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+        .oldLayout = vk::ImageLayout::eColorAttachmentOptimal,
+        .newLayout = vk::ImageLayout::eTransferSrcOptimal,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = frame->ui_image,
+        .subresourceRange = subresource,
+    };
+    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+        .imageMemoryBarrierCount = 1,
+        .pImageMemoryBarriers = &ui_to_readback,
+    });
     const vk::BufferImageCopy copy_region{
         .bufferOffset = 0,
         .bufferRowLength = 0,
@@ -953,7 +1050,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         .imageOffset = {0, 0, 0},
         .imageExtent = {frame->width, frame->height, 1},
     };
-    cmdbuf.copyImageToBuffer(frame->image, vk::ImageLayout::eTransferSrcOptimal,
+    cmdbuf.copyImageToBuffer(frame->ui_image, vk::ImageLayout::eTransferSrcOptimal,
                              frame->readback_buffer, copy_region);
     const vk::ImageMemoryBarrier2 back_to_sampled{
         .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
