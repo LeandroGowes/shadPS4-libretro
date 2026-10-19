@@ -28,7 +28,7 @@ on:
         type: boolean
         default: false
       tag_name:
-        description: Release tag (for example v0.19.1-libretro-promus.3; leave blank to generate one)
+        description: Release tag (for example v0.19.1-libretro.3; leave blank to generate one)
         required: false
         type: string
         default: ''
@@ -145,10 +145,10 @@ jobs:
           if [ -n "${{ inputs.tag_name }}" ]; then
             TAG="${{ inputs.tag_name }}"
           else
-            TAG="v0.19.1-libretro-promus-${DATE}-${SHORT_SHA}"
+            TAG="v0.19.1-libretro-${DATE}-${SHORT_SHA}"
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "title=shadPS4 Libretro · Promus (${DATE} - ${SHORT_SHA})" >> "$GITHUB_OUTPUT"
+          echo "title=shadPS4 Libretro (${DATE} - ${SHORT_SHA})" >> "$GITHUB_OUTPUT"
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
