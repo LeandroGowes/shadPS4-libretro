@@ -130,6 +130,10 @@ jobs:
     needs: [source, windows, linux]
     runs-on: ubuntu-22.04
     steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.source.outputs.commit }}
+
       - name: Download built artifacts
         uses: actions/download-artifact@v4
         with:
@@ -149,6 +153,24 @@ jobs:
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "title=shadPS4 Libretro (${DATE} - ${SHORT_SHA})" >> "$GITHUB_OUTPUT"
+
+      - name: Create release tag
+        env:
+          TAG_NAME: ${{ steps.meta.outputs.tag }}
+          TARGET_COMMIT: ${{ needs.source.outputs.commit }}
+        run: |
+          git check-ref-format "refs/tags/$TAG_NAME"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG_NAME" >/dev/null; then
+            git fetch --no-tags origin "refs/tags/$TAG_NAME:refs/tags/$TAG_NAME"
+            TAG_COMMIT=$(git rev-parse "refs/tags/$TAG_NAME^{commit}")
+            if [ "$TAG_COMMIT" != "$TARGET_COMMIT" ]; then
+              echo "Tag $TAG_NAME already points to $TAG_COMMIT, expected $TARGET_COMMIT" >&2
+              exit 1
+            fi
+          else
+            git tag "$TAG_NAME" "$TARGET_COMMIT"
+            git push origin "refs/tags/$TAG_NAME"
+          fi
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
